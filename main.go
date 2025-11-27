@@ -12,34 +12,42 @@ import (
 )
 
 func main() {
-    e := echo.New()
-    e.Use(middleware.Logger())
-    e.Use(middleware.Recover())
+	e := echo.New()
+	e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
+	e.Use(middleware.CORS()) // Tambahkan CORS agar aman diakses frontend
 
-    // 1️⃣ Connect Prisma client
-    client := db.NewClient()
-    if err := client.Prisma.Connect(); err != nil {
-        log.Fatal("❌ Prisma failed to connect:", err)
-    }
-    log.Println("✅ Prisma connected successfully!")
+	// 1️⃣ Connect Prisma client
+	client := db.NewClient()
+	if err := client.Prisma.Connect(); err != nil {
+		log.Fatal("❌ Prisma failed to connect:", err)
+	}
+	log.Println("✅ Prisma connected successfully!")
 
-    // 2️⃣ Inject client ke handlers
-    handlers.SetPrismaClient(client)
+	// 2️⃣ Inject client ke handlers
+	handlers.SetPrismaClient(client)
 
-    // 3️⃣ Routes
-    e.POST("/register", handlers.RegisterUser)
-    e.POST("/login", handlers.LoginUser)
+	// 3️⃣ Routing Grouping
+	// Base URL: http://localhost:8080/api/v1
+	v1 := e.Group("/api/v1")
 
-    api := e.Group("/api")
-    api.Use(mid.JWTMiddleware())
+	// --- PUBLIC ROUTES (Tidak butuh Token) ---
+	v1.POST("/register", handlers.RegisterUser) // -> /api/v1/register
+	v1.POST("/login", handlers.LoginUser)       // -> /api/v1/login
 
-    api.GET("/profile", func(c echo.Context) error {
-        return c.JSON(200, echo.Map{
-            "user_id": c.Get("user_id"),
-            "email":   c.Get("email"),
-        })
-    })
+	// --- PROTECTED ROUTES (Butuh Token JWT) ---
+	// Kita buat sub-group dari v1 agar prefix-nya tetap ikut
+	protected := v1.Group("") 
+	protected.Use(mid.JWTMiddleware())
 
-    // 4️⃣ Start server
-    e.Logger.Fatal(e.Start(":8080"))
+	protected.GET("/profile", func(c echo.Context) error {
+		return c.JSON(200, echo.Map{
+			"user_id": c.Get("user_id"),
+			"email":   c.Get("email"),
+			"message": "You are accessing a protected route",
+		})
+	}) // -> /api/v1/profile
+
+	// 4️⃣ Start server
+	e.Logger.Fatal(e.Start(":8080"))
 }

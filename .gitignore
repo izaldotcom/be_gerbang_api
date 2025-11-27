@@ -1,0 +1,46 @@
+# --- Binaries & Build Artifacts ---
+# File binary hasil build (Linux/Mac/Windows)
+main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Folder temporary yang dibuat oleh Air (Hot Reload)
+tmp/
+build/
+
+# --- Security & Environment ---
+# PENTING: Jangan pernah upload file .env ke git!
+.env
+.env.local
+.env.*.local
+
+# --- Go Specific ---
+# Folder vendor (kecuali kamu memang menggunakan 'go mod vendor')
+vendor/
+# Go workspaces
+go.work
+go.work.sum
+
+# --- Prisma Client Go (steebchen) ---
+# Jika ada file binary engine prisma yang terdownload
+*query-engine*
+*migration-engine*
+# Log file jika ada
+*.log
+
+# --- IDE & Editor System Files ---
+# VS Code
+.vscode/
+# JetBrains (GoLand)
+.idea/
+*.iml
+# Mac OS
+.DS_Store
+
+# --- Testing ---
+# Coverage profiles
+*.out
+*.coverprofile
