@@ -23,3 +23,45 @@ model User {
 
   @@map("user")
 }
+
+model ApiKey {
+  id          String   @id @default(uuid()) @db.Char(36)
+  seller_name String   @db.VarChar(255)
+  api_key     String   @unique @db.VarChar(255)
+  secret      String   @db.VarChar(255)
+  status      Boolean  @default(true)
+  created_at  DateTime @default(now()) @db.Timestamp
+  updated_at  DateTime @updatedAt @db.Timestamp
+
+  @@map("api_key")
+}
+
+model Supplier {
+  id           String           @id @default(uuid()) @db.Char(36)
+  name         String           @db.VarChar(255)
+  type         String           @db.VarChar(50)
+  base_url     String?          @db.VarChar(255)
+  status       Boolean          @default(true)
+  created_at   DateTime         @default(now()) @db.Timestamp
+  updated_at   DateTime         @updatedAt @db.Timestamp
+  products     InternalProduct[] @relation("SupplierProducts")
+
+  @@map("supplier")
+}
+
+model InternalProduct {
+  id            String   @id @default(uuid()) @db.Char(36)
+  supplier_id   String   @db.Char(36)
+  name          String   @db.VarChar(255)
+  denom         Int
+  price         Int
+  status        Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamp
+  updated_at    DateTime @updatedAt @db.Timestamp
+
+  Supplier      Supplier @relation("SupplierProducts", fields: [supplier_id], references: [id])
+
+  @@map("internal_product")
+}
+
+

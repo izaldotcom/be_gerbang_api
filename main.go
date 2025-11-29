@@ -7,11 +7,21 @@ import (
 	mid "gerbangapi/app/middleware"
 	"gerbangapi/prisma/db"
 
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
+	// 👇 2. Load file .env paling pertama!
+	// Ini penting agar JWT_SECRET terbaca sebelum digunakan oleh middleware
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
+	} else {
+		log.Println("✅ .env file loaded successfully.")
+	}
+
 	e := echo.New()
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -23,6 +33,13 @@ func main() {
 		log.Fatal("❌ Prisma failed to connect:", err)
 	}
 	log.Println("✅ Prisma connected successfully!")
+
+	// Pastikan disconnect saat aplikasi mati (Best Practice)
+	defer func() {
+		if err := client.Prisma.Disconnect(); err != nil {
+			panic(err)
+		}
+	}()
 
 	// 2️⃣ Inject client ke handlers
 	handlers.SetPrismaClient(client)
@@ -37,10 +54,11 @@ func main() {
 
 	// --- PROTECTED ROUTES (Butuh Token JWT) ---
 	// Kita buat sub-group dari v1 agar prefix-nya tetap ikut
-	protected := v1.Group("") 
+	protected := v1.Group("")
 	protected.Use(mid.JWTMiddleware())
 
-	protected.GET("/profile", func(c echo.Context) error {
+	// Endpoint untuk mendapatkan profile
+	protected.GET("/get-profile", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{
 			"user_id": c.Get("user_id"),
 			"email":   c.Get("email"),
@@ -48,6 +66,13 @@ func main() {
 		})
 	}) // -> /api/v1/profile
 
+	// --- Seller Routes ---
+	// Menambahkan endpoint untuk seller dengan autentikasi
+	protected.GET("/seller/products", handlers.SellerProducts) // -> /api/v1/seller/products
+	protected.POST("/seller/order", handlers.SellerOrder)      // -> /api/v1/seller/order
+	protected.GET("/seller/status", handlers.SellerStatus)     // -> /api/v1/seller/status
+
 	// 4️⃣ Start server
+	log.Println("🚀 Server running on http://localhost:8080")
 	e.Logger.Fatal(e.Start(":8080"))
 }
