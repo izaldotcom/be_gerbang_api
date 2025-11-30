@@ -13,8 +13,7 @@ import (
 )
 
 func main() {
-	// 👇 2. Load file .env paling pertama!
-	// Ini penting agar JWT_SECRET terbaca sebelum digunakan oleh middleware
+	// 👇 1. Load file .env paling pertama!
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
@@ -23,56 +22,66 @@ func main() {
 	}
 
 	e := echo.New()
+
+	// --- GLOBAL MIDDLEWARE ---
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.CORS()) // Tambahkan CORS agar aman diakses frontend
+	e.Use(middleware.CORS())
 
-	// 1️⃣ Connect Prisma client
+	// 👇 2. RATE LIMITER (Sesuai Plan Week 1)
+	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
+
+	// 3️⃣ Connect Prisma client
 	client := db.NewClient()
 	if err := client.Prisma.Connect(); err != nil {
 		log.Fatal("❌ Prisma failed to connect:", err)
 	}
 	log.Println("✅ Prisma connected successfully!")
 
-	// Pastikan disconnect saat aplikasi mati (Best Practice)
 	defer func() {
 		if err := client.Prisma.Disconnect(); err != nil {
 			panic(err)
 		}
 	}()
 
-	// 2️⃣ Inject client ke handlers
+	// 4️⃣ Inject client ke handlers
 	handlers.SetPrismaClient(client)
 
-	// 3️⃣ Routing Grouping
+	// 5️⃣ Routing Grouping
 	// Base URL: http://localhost:8080/api/v1
 	v1 := e.Group("/api/v1")
 
-	// --- PUBLIC ROUTES (Tidak butuh Token) ---
-	v1.POST("/register", handlers.RegisterUser) // -> /api/v1/register
-	v1.POST("/login", handlers.LoginUser)       // -> /api/v1/login
+	// === A. PUBLIC ROUTES (Tidak butuh Token) ===
+	// Endpoint ini boleh diakses siapa saja (termasuk saat token mati)
+	v1.POST("/register", handlers.RegisterUser)      // -> /api/v1/register
+	v1.POST("/login", handlers.LoginUser)            // -> /api/v1/login
+	v1.POST("/refresh-token", handlers.RefreshToken) // -> /api/v1/refresh-token (✅ SUDAH DIPERBAIKI)
 
-	// --- PROTECTED ROUTES (Butuh Token JWT) ---
-	// Kita buat sub-group dari v1 agar prefix-nya tetap ikut
-	protected := v1.Group("")
-	protected.Use(mid.JWTMiddleware())
+	// === B. USER PROTECTED ROUTES (Butuh JWT Token) ===
+	// Group ini menggunakan JWTMiddleware
+	userGroup := v1.Group("")
+	userGroup.Use(mid.JWTMiddleware())
 
-	// Endpoint untuk mendapatkan profile
-	protected.GET("/get-profile", func(c echo.Context) error {
+	// Endpoint untuk mendapatkan profile user
+	userGroup.GET("/get-profile", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{
 			"user_id": c.Get("user_id"),
 			"email":   c.Get("email"),
 			"message": "You are accessing a protected route",
 		})
-	}) // -> /api/v1/profile
+	}) // -> /api/v1/get-profile
 
-	// --- Seller Routes ---
-	// Menambahkan endpoint untuk seller dengan autentikasi
-	protected.GET("/seller/products", handlers.SellerProducts) // -> /api/v1/seller/products
-	protected.POST("/seller/order", handlers.SellerOrder)      // -> /api/v1/seller/order
-	protected.GET("/seller/status", handlers.SellerStatus)     // -> /api/v1/seller/status
+	// === C. SELLER ROUTES (Butuh API Key & HMAC) ===
+	// Group ini terpisah dari JWT user, menggunakan SellerSecurityMiddleware
+	sellerGroup := v1.Group("/seller")
+	sellerGroup.Use(mid.SellerSecurityMiddleware(client))
 
-	// 4️⃣ Start server
+	// Endpoint Seller
+	sellerGroup.GET("/products", handlers.SellerProducts) // -> /api/v1/seller/products
+	sellerGroup.POST("/order", handlers.SellerOrder)      // -> /api/v1/seller/order
+	sellerGroup.GET("/status", handlers.SellerStatus)     // -> /api/v1/seller/status
+
+	// 6️⃣ Start server
 	log.Println("🚀 Server running on http://localhost:8080")
 	e.Logger.Fatal(e.Start(":8080"))
 }

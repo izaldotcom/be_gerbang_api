@@ -9,26 +9,39 @@ import (
 )
 
 func generateRandomKey(n int) string {
-    b := make([]byte, n)
-    rand.Read(b)
-    return hex.EncodeToString(b)
+	b := make([]byte, n)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-func CreateApiKey(ctx context.Context, client *db.PrismaClient, sellerName string) (*db.APIKeyModel, error) {
-    apiKey := generateRandomKey(32)
-    secret := generateRandomKey(32)
+// Perhatikan return type: db.APIKeyModel (Huruf besar API)
+func CreateApiKey(ctx context.Context, client *db.PrismaClient, userID string, sellerName string) (*db.APIKeyModel, error) {
+	apiKey := generateRandomKey(32)
+	secret := generateRandomKey(32)
 
-    key, err := client.APIKey.CreateOne(
-        db.APIKey.SellerName.Set(sellerName),
-        db.APIKey.APIKey.Set(apiKey),
-        db.APIKey.Secret.Set(secret),
-    ).Exec(ctx)
+	// 👇 PERBAIKAN: Gunakan client.APIKey (Besar) & User.Link
+	key, err := client.APIKey.CreateOne(
+		// 1. Relasi User (Wajib) -> Pakai Link, bukan UserID.Set
+		db.APIKey.User.Link(
+			db.User.ID.Equals(userID),
+		),
+		
+		// 2. API Key (Wajib)
+		db.APIKey.APIKey.Set(apiKey),
+		
+		// 3. Secret (Wajib)
+		db.APIKey.Secret.Set(secret),
+		
+		// 4. Field Opsional (SellerName)
+		db.APIKey.SellerName.Set(sellerName),
+	).Exec(ctx)
 
-    return key, err
+	return key, err
 }
 
 func ValidateApiKey(ctx context.Context, client *db.PrismaClient, apiKey string) (*db.APIKeyModel, error) {
-    return client.APIKey.FindUnique(
-        db.APIKey.APIKey.Equals(apiKey),
-    ).Exec(ctx)
+	// 👇 PERBAIKAN: Gunakan client.APIKey
+	return client.APIKey.FindUnique(
+		db.APIKey.APIKey.Equals(apiKey),
+	).Exec(ctx)
 }

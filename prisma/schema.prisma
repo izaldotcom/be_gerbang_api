@@ -7,61 +7,92 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// --- MODEL USER ---
 model User {
-  id         String   @id @default(uuid()) @db.Char(100)
-  role_id    String   @db.Char(100)
-  name       String   @db.VarChar(255)
-  email      String   @unique @db.VarChar(255)
-  password   String   @db.VarChar(255)
-  phone      String   @db.VarChar(20)
-  status     String   @db.VarChar(20)
-  last_login DateTime? @db.DateTime
-  created_at DateTime @default(now()) @db.Timestamp
-  created_by String?  @db.Char(255)
-  updated_at DateTime @updatedAt @db.Timestamp
-  updated_by String?  @db.Char(255)
+  // Kita hapus @db.Char(100) agar default ke VARCHAR(191).
+  // Ini lebih aman dan anti-ribet untuk Foreign Key.
+  id            String    @id @default(uuid()) 
+  
+  role_id       String?   // Opsional dulu biar aman
+  name          String
+  email         String    @unique
+  password      String
+  phone         String?
+  status        String?
+  last_login    DateTime?
+  
+  created_at    DateTime  @default(now())
+  created_by    String?
+  updated_at    DateTime  @updatedAt
+  updated_by    String?
+
+  // Relasi
+  refreshTokens RefreshToken[]
+  apiKeys       ApiKey[]
 
   @@map("user")
 }
 
+// --- MODEL REFRESH TOKEN (Step 3) ---
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  
+  // Relasi ke User
+  userId    String   @map("user_id") // Tipe data otomatis sama dengan User.id (String)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("refresh_token")
+}
+
+// --- MODEL API KEY (Seller) ---
 model ApiKey {
-  id          String   @id @default(uuid()) @db.Char(36)
-  seller_name String   @db.VarChar(255)
-  api_key     String   @unique @db.VarChar(255)
-  secret      String   @db.VarChar(255)
+  id          String   @id @default(uuid())
+  
+  // Relasi ke User (Owner API Key)
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id])
+
+  isActive    Boolean  @default(true) @map("is_active")
+  seller_name String?  // String biasa
+  api_key     String   @unique
+  secret      String
   status      Boolean  @default(true)
-  created_at  DateTime @default(now()) @db.Timestamp
-  updated_at  DateTime @updatedAt @db.Timestamp
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   @@map("api_key")
 }
 
+// --- MODEL PENDUKUNG LAINNYA ---
 model Supplier {
-  id           String           @id @default(uuid()) @db.Char(36)
-  name         String           @db.VarChar(255)
-  type         String           @db.VarChar(50)
-  base_url     String?          @db.VarChar(255)
-  status       Boolean          @default(true)
-  created_at   DateTime         @default(now()) @db.Timestamp
-  updated_at   DateTime         @updatedAt @db.Timestamp
+  id           String            @id @default(uuid())
+  name         String
+  type         String
+  base_url     String?
+  status       Boolean           @default(true)
+  created_at   DateTime          @default(now())
+  updated_at   DateTime          @updatedAt
+  
   products     InternalProduct[] @relation("SupplierProducts")
 
   @@map("supplier")
 }
 
 model InternalProduct {
-  id            String   @id @default(uuid()) @db.Char(36)
-  supplier_id   String   @db.Char(36)
-  name          String   @db.VarChar(255)
+  id            String   @id @default(uuid())
+  supplier_id   String
+  name          String
   denom         Int
   price         Int
   status        Boolean  @default(true)
-  created_at    DateTime @default(now()) @db.Timestamp
-  updated_at    DateTime @updatedAt @db.Timestamp
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
   Supplier      Supplier @relation("SupplierProducts", fields: [supplier_id], references: [id])
 
   @@map("internal_product")
 }
-
-
