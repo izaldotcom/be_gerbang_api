@@ -7,13 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- MODEL USER ---
 model User {
-  // Kita hapus @db.Char(100) agar default ke VARCHAR(191).
-  // Ini lebih aman dan anti-ribet untuk Foreign Key.
   id            String    @id @default(uuid()) 
   
-  role_id       String?   // Opsional dulu biar aman
+  role_id       String?   
+  role          Role?     @relation(fields: [role_id], references: [id])
   name          String
   email         String    @unique
   password      String
@@ -26,20 +24,17 @@ model User {
   updated_at    DateTime  @updatedAt
   updated_by    String?
 
-  // Relasi
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
 
   @@map("user")
 }
 
-// --- MODEL REFRESH TOKEN (Step 3) ---
 model RefreshToken {
   id        String   @id @default(uuid())
   token     String   @unique
   
-  // Relasi ke User
-  userId    String   @map("user_id") // Tipe data otomatis sama dengan User.id (String)
+  userId    String   @map("user_id")
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   expiresAt DateTime @map("expires_at")
@@ -48,16 +43,14 @@ model RefreshToken {
   @@map("refresh_token")
 }
 
-// --- MODEL API KEY (Seller) ---
 model ApiKey {
   id          String   @id @default(uuid())
   
-  // Relasi ke User (Owner API Key)
   userId      String   @map("user_id")
   user        User     @relation(fields: [userId], references: [id])
 
   isActive    Boolean  @default(true) @map("is_active")
-  seller_name String?  // String biasa
+  seller_name String?
   api_key     String   @unique
   secret      String
   status      Boolean  @default(true)
@@ -67,7 +60,6 @@ model ApiKey {
   @@map("api_key")
 }
 
-// --- MODEL PENDUKUNG LAINNYA ---
 model Supplier {
   id           String            @id @default(uuid())
   name         String
@@ -95,4 +87,49 @@ model InternalProduct {
   Supplier      Supplier @relation("SupplierProducts", fields: [supplier_id], references: [id])
 
   @@map("internal_product")
+}
+
+model Role {
+  id          String    @id @default(uuid()) @map("role_id")
+  name        String    @map("role_name") @db.VarChar(100)
+  description String?   @db.Text
+  
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  createdBy   String?   @map("created_by") @db.VarChar(255)
+  updatedAt   DateTime? @updatedAt @map("updated_at") @db.Timestamp(0)
+  updatedBy   String?   @map("updated_by") @db.VarChar(255)
+
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@map("role")
+}
+
+model Permission {
+  id            String    @id @map("permission_id") @db.Char(100)
+  permissionKey String    @map("permission_key") @db.VarChar(100)
+  description   String?   @db.Text
+  
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  createdBy     String?   @map("created_by") @db.VarChar(255)
+  updatedAt     DateTime? @updatedAt @map("updated_at") @db.Timestamp(0)
+  updatedBy     String?   @map("updated_by") @db.VarChar(255)
+
+  rolePermissions RolePermission[]
+
+  @@map("permission")
+}
+
+model RolePermission {
+  id           String   @id @db.Char(100)
+  roleId       String   @map("role_id") @db.Char(100)
+  permissionId String   @map("permission_id") @db.Char(100)
+  
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  createdBy    String?  @map("created_by") @db.VarChar(255)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@map("role_permission")
 }
