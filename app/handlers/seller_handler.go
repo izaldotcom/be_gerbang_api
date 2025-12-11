@@ -57,12 +57,13 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	internalOrderID := uuid.New().String()
 
-	// Capture the error directly from ExecuteRaw
+	// FIX: ExecuteRaw hanya mengembalikan QueryExec, kita panggil .Exec() untuk menjalankan.
 	_, err := h.DB.Prisma.ExecuteRaw(
 		"INSERT INTO internal_order (id, product_id, buyer_uid, quantity, status) VALUES (?, ?, ?, ?, 'pending')",
 		internalOrderID, req.ProductID, req.Destination, 1,
-	).Exec(c.Request().Context()) // ExecuteRaw often requires .Exec(context)
+	).Exec(c.Request().Context())
 
+	// Check if there was an error in the raw execution
 	if err != nil {
 		return c.JSON(500, echo.Map{
 			"error": "Failed inserting internal_order: " + err.Error(),
@@ -91,20 +92,26 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	// ======================================================
-	// 4) GET supplier_order_item
+	// 4) GET supplier_order_item (FIXED: Menggunakan Exec(context, &target))
 	// ======================================================
-	// QueryRaw returns the data (as []map[string]interface{}) and an error directly
+
 	var items []map[string]interface{}
-	err = h.DB.Prisma.QueryRaw(
+	
+	queryExec := h.DB.Prisma.QueryRaw(
 		"SELECT supplier_product_id FROM supplier_order_item WHERE supplier_order_id = ? LIMIT 1",
 		supplierOrder.ID,
-	).Exec(c.Request().Context(), &items) // Use .Exec(context, &target) to get data
+	)
 
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Query supplier_order_item failed: " + err.Error()})
+	// FIX: Panggil Exec dengan 2 argumen (context dan pointer ke target slice)
+	// dan tangkap error-nya saja, karena Exec hanya mengembalikan 1 nilai (error).
+	queryErr := queryExec.Exec(c.Request().Context(), &items)
+
+	// Check if there was an error in the query result
+	if queryErr != nil {
+		return c.JSON(500, echo.Map{"error": "Query supplier_order_item failed: " + queryErr.Error()})
 	}
 
-	// Check the length of the items slice which now holds the data
+	// Ensure data is available in the result
 	if len(items) == 0 {
 		return c.JSON(500, echo.Map{"error": "No supplier_order_item"})
 	}
@@ -116,8 +123,8 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	trxID, err := svc.PlaceOrder(req.Destination, nominalID)
 	if err != nil {
-
 		// supplier_order FAILED
+		// FIX: Tambahkan .Exec(Context) untuk semua raw query yang menjalankan update.
 		h.DB.Prisma.ExecuteRaw(
 			"UPDATE supplier_order SET status='failed', last_error=? WHERE id=?",
 			err.Error(),
@@ -135,11 +142,13 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	// 6) Mark SUCCESS
 	// ======================================================
+	// FIX: Tambahkan .Exec(Context)
 	h.DB.Prisma.ExecuteRaw(
 		"UPDATE supplier_order SET status='success' WHERE id=?",
 		supplierOrder.ID,
 	).Exec(c.Request().Context())
 
+	// FIX: Tambahkan .Exec(Context)
 	h.DB.Prisma.ExecuteRaw(
 		"UPDATE internal_order SET status='success' WHERE id=?",
 		internalOrderID,

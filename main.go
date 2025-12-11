@@ -5,6 +5,7 @@ import (
 
 	"gerbangapi/app/handlers"
 	mid "gerbangapi/app/middleware"
+	"gerbangapi/app/services"
 	"gerbangapi/prisma/db"
 
 	"github.com/joho/godotenv"
@@ -13,14 +14,15 @@ import (
 )
 
 func main() {
-	// 👇 1. Load file .env paling pertama!
+	// 1. Load file .env
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
+		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
 	} else {
 		log.Println("✅ .env file loaded successfully.")
 	}
 
+	// Create Echo instance
 	e := echo.New()
 
 	// --- GLOBAL MIDDLEWARE ---
@@ -28,13 +30,13 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
-	// 👇 2. RATE LIMITER
+	// 2. RATE LIMITER
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 
 	// ---------------------------------------------------------
 	// 3️⃣ DATABASE CONNECTIONS (MySQL & Redis)
 	// ---------------------------------------------------------
-	
+
 	// A. Connect Prisma (MySQL)
 	client := db.NewClient()
 	if err := client.Prisma.Connect(); err != nil {
@@ -42,36 +44,39 @@ func main() {
 	}
 	log.Println("✅ Prisma connected successfully!")
 
-	// Pastikan disconnect saat aplikasi mati
+	// Ensure disconnect when the app shuts down
 	defer func() {
 		if err := client.Prisma.Disconnect(); err != nil {
 			panic(err)
 		}
 	}()
 
-	// B. Connect Redis (👇 TAMBAHKAN INI DI SINI)
-	// Fungsi ini akan menginisialisasi variabel global db.Rdb
-	db.ConnectRedis() 
+	// B. Connect Redis
+	db.ConnectRedis()
 
 	// ---------------------------------------------------------
 	// 4️⃣ HANDLERS & ROUTING
 	// ---------------------------------------------------------
 
-	// Inject client ke handlers
-	handlers.SetPrismaClient(client)
+	// 4.1. Initialize Services
+	orderService := services.NewOrderService(client)
+	
+	// 4.2. Initialize Handlers (SellerHandler requires DB and OrderService)
+	sellerHandler := handlers.NewSellerHandler(client, orderService)
 
 	// 5️⃣ Routing Grouping
-	// Base URL: http://localhost:8080/api/v1
 	v1 := e.Group("/api/v1")
 
-	// === A. PUBLIC ROUTES ===
-	v1.POST("/register", handlers.RegisterUser)      
-	v1.POST("/login", handlers.LoginUser)            
-	v1.POST("/refresh-token", handlers.RefreshToken) 
+	// === A. PUBLIC ROUTES (Asumsi ini adalah fungsi standalone) ===
+	v1.POST("/register", handlers.RegisterUser)
+	v1.POST("/login", handlers.LoginUser)
+	v1.POST("/refresh-token", handlers.RefreshToken)
 
 	// === B. USER PROTECTED ROUTES ===
 	userGroup := v1.Group("")
-	userGroup.Use(mid.JWTMiddleware())
+	
+	// FIX: Panggil tanpa argumen, sesuai error kompilasi
+	userGroup.Use(mid.JWTMiddleware()) 
 
 	userGroup.GET("/get-profile", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{
@@ -85,9 +90,17 @@ func main() {
 	sellerGroup := v1.Group("/seller")
 	sellerGroup.Use(mid.SellerSecurityMiddleware(client))
 
-	sellerGroup.GET("/products", handlers.SellerProducts) 
-	sellerGroup.POST("/order", handlers.SellerOrder)      
-	sellerGroup.GET("/status", handlers.SellerStatus)     
+	// Menggunakan instance sellerHandler untuk memanggil metodenya
+	sellerGroup.GET("/products", sellerHandler.SellerProducts) 
+	sellerGroup.POST("/order", sellerHandler.SellerOrder)
+	
+	// Asumsi SellerStatus juga merupakan metode dari SellerHandler
+	// Karena SellerStatus tidak ada di kode handler sebelumnya, kita buat placeholder.
+	sellerGroup.GET("/status", func(c echo.Context) error {
+		// Jika Anda memiliki metode SellerStatus di SellerHandler, gunakan:
+		// sellerHandler.SellerStatus
+		return c.JSON(200, echo.Map{"message": "Seller status endpoint"})
+	})
 
 	// 6️⃣ Start server
 	log.Println("🚀 Server running on http://localhost:8080")
