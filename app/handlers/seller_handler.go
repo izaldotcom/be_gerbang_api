@@ -59,15 +59,16 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	// FIX: ExecuteRaw hanya mengembalikan QueryExec, kita panggil .Exec() untuk menjalankan.
 	_, err := h.DB.Prisma.ExecuteRaw(
-		"INSERT INTO internal_order (id, product_id, buyer_uid, quantity, status) VALUES (?, ?, ?, ?, 'pending')",
-		internalOrderID, req.ProductID, req.Destination, 1,
+			`INSERT INTO internal_order 
+			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
+			VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())`,
+			internalOrderID, req.ProductID, req.Destination, 1,
 	).Exec(c.Request().Context())
 
-	// Check if there was an error in the raw execution
 	if err != nil {
-		return c.JSON(500, echo.Map{
-			"error": "Failed inserting internal_order: " + err.Error(),
-		})
+			return c.JSON(500, echo.Map{
+					"error": "Failed inserting internal_order: " + err.Error(),
+			})
 	}
 
 	// ======================================================
