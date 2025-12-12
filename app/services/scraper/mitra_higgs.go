@@ -37,7 +37,7 @@ func NewMitraHiggsService() (*MitraHiggsService, error) {
 		return nil, err
 	}
 
-	// Gunakan Headless: false agar browser terlihat di layar
+	// Headless: false agar terlihat prosesnya
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(false),
 	})
@@ -45,7 +45,7 @@ func NewMitraHiggsService() (*MitraHiggsService, error) {
 		return nil, err
 	}
 
-	// Setup Mobile View (User Agent Android)
+	// Setup Mobile View
 	ctx, err := browser.NewContext(playwright.BrowserNewContextOptions{
 		UserAgent: playwright.String("Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36"),
 	})
@@ -58,7 +58,6 @@ func NewMitraHiggsService() (*MitraHiggsService, error) {
 		return nil, err
 	}
 
-	// Set Ukuran Layar HP (iPhone X / Android standar)
 	if err := page.SetViewportSize(375, 812); err != nil {
 		return nil, err
 	}
@@ -81,13 +80,11 @@ func (s *MitraHiggsService) Close() {
 	}
 }
 
-// === LOGIC LOGIN (FINAL FIX - BUTTON ID) ===
+// === LOGIC LOGIN ===
 func (s *MitraHiggsService) Login(gameID, password string) error {
 	ctx := context.Background()
 	log.Println("🚀 Memulai proses Login...")
 
-	// 1. Buka Website
-	log.Println("🔄 Membuka Halaman Login...")
 	_, err := s.Page.Goto("https://mitrahiggs.com/", playwright.PageGotoOptions{
 		Timeout: playwright.Float(60000),
 	})
@@ -99,79 +96,73 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 		State: playwright.LoadStateDomcontentloaded,
 	})
 
-	// 2. CEK & PINDAH KE ID LOGIN
+	// 1. CEK & PINDAH KE ID LOGIN
 	isPasswordVisible, _ := s.Page.Locator("input[type='password']").IsVisible()
 
 	if !isPasswordVisible {
 		log.Println("👉 Mode 'Nomor HP' terdeteksi. Mencoba klik 'ID Login'...")
-		s.Page.Evaluate("window.scrollTo(0, document.body.scrollHeight)")
-		time.Sleep(500 * time.Millisecond)
-
+		
 		// Klik "ID Login"
 		err := s.Page.Locator("span[name='index-html-id-login']").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		if err != nil {
 			s.Page.Locator(".login-text").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		}
 
-		// Tunggu Input Password Muncul
-		log.Println("⏳ Menunggu form berubah...")
 		s.Page.WaitForSelector("input[type='password']", playwright.PageWaitForSelectorOptions{
 			Timeout: playwright.Float(5000),
 		})
 	}
 
-	// 3. ISI FORM
+	// 2. ISI FORM
 	log.Println("✍️ Mengisi ID Game dan Password...")
 	s.Page.Locator("input[type='text']:visible").First().Fill(gameID)
 	s.Page.Locator("input[type='password']").Fill(password)
 
-	// 4. KLIK LOGIN (PERBAIKAN UTAMA DI SINI)
+	// 3. KLIK LOGIN
 	log.Println("🖱️ Klik Tombol Login...")
-	
-	// Kita gunakan ID: #pwdLoginButton (Sesuai elemen HTML yang Anda kirim)
-	// Ini JAUH lebih akurat daripada mencari teks.
 	err = s.Page.Locator("#pwdLoginButton").Click(playwright.LocatorClickOptions{
-		Force: playwright.Bool(true), // Force click walaupun ketutup dikit
+		Force: playwright.Bool(true),
 	})
 	
 	if err != nil {
-		// Fallback ke class jika ID entah kenapa gagal
-		log.Println("⚠️ Gagal klik ID #pwdLoginButton, mencoba class .btnLogin...")
+		log.Println("⚠️ Gagal klik #pwdLoginButton, mencoba .btnLogin...")
 		s.Page.Locator(".btnLogin").Click()
 	}
 
-	// 5. VERIFIKASI SUKSES
+	// 4. VERIFIKASI SUKSES
 	log.Println("⏳ Menunggu redirect ke Dashboard Trade...")
-
-	// Tunggu URL berubah mengandung "/trade/index"
 	err = s.Page.WaitForURL("**/trade/index**", playwright.PageWaitForURLOptions{
 		Timeout: playwright.Float(20000),
 	})
 
 	if err != nil {
-		// Cek error message
 		if vis, _ := s.Page.Locator(".alert-danger").IsVisible(); vis {
 			msg, _ := s.Page.Locator(".alert-danger").TextContent()
 			return fmt.Errorf("login ditolak: %s", msg)
 		}
-		
 		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_login_failed.png")})
-		return fmt.Errorf("login timeout: tidak masuk ke halaman trade/index")
+		return fmt.Errorf("login timeout")
 	}
 
 	log.Println("✅ Redirect Sukses! URL sekarang:", s.Page.URL())
 
-	// 6. TUTUP POPUP IKLAN (Gift Card)
-	time.Sleep(2 * time.Second) // Tunggu popup muncul
+	// 5. TUTUP POPUP (REQUEST KHUSUS)
+	// Target: <div id="thickdivInvitation" ... onclick="hideInvitation()"></div>
+	time.Sleep(2 * time.Second) 
 	
-	// Coba tutup popup. Selector tombol close biasanya .close atau .close-btn
-	// Kita coba klik di pojok kanan atas popup atau cari elemen close umum
-	if count, _ := s.Page.Locator(".close-btn").Count(); count > 0 {
-		log.Println("🧹 Menutup Popup Iklan...")
-		s.Page.Locator(".close-btn").Click()
-	} else {
-		// Kadang popup menutup jika klik di luar (backdrop)
-		// Kita biarkan dulu, biasanya tidak menghalangi URL check
+	popupSelector := "#thickdivInvitation"
+	if count, _ := s.Page.Locator(popupSelector).Count(); count > 0 {
+		if vis, _ := s.Page.Locator(popupSelector).IsVisible(); vis {
+			log.Println("🧹 Menutup Popup Invitation (#thickdivInvitation)...")
+			
+			// Klik elemen tersebut untuk memicu onclick="hideInvitation()"
+			s.Page.Locator(popupSelector).Click(playwright.LocatorClickOptions{
+				Force: playwright.Bool(true),
+			})
+			
+			// Tunggu sebentar agar hilang
+			time.Sleep(1 * time.Second)
+		}
 	}
 
 	// Simpan Cookie
@@ -183,27 +174,98 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	return nil
 }
 
-// PlaceOrder (Dummy Implementation for Week 3)
-func (s *MitraHiggsService) PlaceOrder(playerID, productCode string) (string, error) {
-	log.Println("🛒 Memulai Transaksi untuk Player:", playerID)
+// === PLACE ORDER (REAL IMPLEMENTATION BASED ON HTML) ===
+func (s *MitraHiggsService) PlaceOrder(playerID, productID string) (string, error) {
+	// playerID = "3145526"
+	// productID = "6" (Bukan "1M", tapi ID dari inspect element)
 
-	if s.Page.URL() != "https://mitrahiggs.com/" {
-		s.Page.Goto("https://mitrahiggs.com/")
+	log.Printf("🛒 Memulai Transaksi: Player %s, Item ID %s", playerID, productID)
+
+	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
+	})
+	time.Sleep(1 * time.Second)
+
+	// 1. CEK POPUP LAGI (Jaga-jaga muncul lagi di halaman trade)
+	popupSelector := "#thickdivInvitation"
+	if vis, _ := s.Page.Locator(popupSelector).IsVisible(); vis {
+		log.Println("🧹 Menutup Popup yang muncul lagi...")
+		s.Page.Locator(popupSelector).Click()
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// NOTE: Selector ini harus disesuaikan lagi nanti setelah berhasil login
-	err := s.Page.Locator("input[placeholder*='ID']").First().Fill(playerID)
+	// 2. INPUT ID PLAYER
+	// Target HTML: <input type="text" id="buyerId" ...>
+	log.Println("✍️ Mengisi ID Player ke #buyerId...")
+	
+	inputSelector := "#buyerId"
+	if vis, _ := s.Page.Locator(inputSelector).IsVisible(); !vis {
+		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_input.png")})
+		return "", fmt.Errorf("kolom input #buyerId tidak ditemukan")
+	}
+
+	// Kosongkan dulu baru isi
+	s.Page.Locator(inputSelector).Fill("") 
+	err := s.Page.Locator(inputSelector).Fill(playerID)
 	if err != nil {
-		return "", fmt.Errorf("gagal menemukan input ID Player")
+		return "", fmt.Errorf("gagal isi ID: %v", err)
 	}
 
-	log.Printf("🔍 Memilih produk: %s", productCode)
-	// Klik elemen produk (Dummy selector)
-	s.Page.Locator(fmt.Sprintf("text=%s", productCode)).Click()
+	// 3. PILIH PRODUK
+	// Target HTML: <li id="itemId_6" ...>
+	// Selector dinamis berdasarkan productID (misal: "6")
+	itemSelector := fmt.Sprintf("#itemId_%s", productID)
+	
+	log.Printf("👉 Memilih produk: %s", itemSelector)
+	
+	itemLoc := s.Page.Locator(itemSelector)
+	
+	// Cek visibilitas, scroll jika perlu
+	if vis, _ := itemLoc.IsVisible(); !vis {
+		log.Println("⚠️ Produk tidak terlihat, scrolling...")
+		s.Page.Evaluate("window.scrollTo(0, document.body.scrollHeight)")
+		itemLoc.ScrollIntoViewIfNeeded()
+	}
 
-	// Klik Beli
-	s.Page.Locator("button:has-text('Beli')").Click()
+	// Klik Produk
+	err = itemLoc.Click()
+	if err != nil {
+		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_product.png")})
+		return "", fmt.Errorf("gagal klik produk %s: %v", itemSelector, err)
+	}
+	
+	time.Sleep(500 * time.Millisecond)
 
-	log.Println("✅ Order disubmit (Mocking Success)")
-	return "TRX-PENDING-SCRAPE", nil
+	// 4. SUBMIT ORDER
+	// Target HTML: <a class="buyBtns..." onclick="Index.queryBuyer();" ...>
+	// Selector: Class .buyBtns atau berdasarkan onclick
+	
+	log.Println("🖱️ Klik Tombol Proses (Query Buyer)...")
+	
+	// Selector yang sangat spesifik berdasarkan onclick action
+	submitSelector := "a[onclick*='Index.queryBuyer']"
+	
+	// Fallback ke class jika attribute selector gagal
+	if count, _ := s.Page.Locator(submitSelector).Count(); count == 0 {
+		submitSelector = ".buyBtns"
+	}
+
+	err = s.Page.Locator(submitSelector).Click()
+	if err != nil {
+		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_submit.png")})
+		return "", fmt.Errorf("gagal klik tombol submit: %v", err)
+	}
+
+	// 5. HANDLING AFTER SUBMIT
+	// Biasanya setelah queryBuyer, akan muncul Modal Konfirmasi Nama Player
+	// Karena kita belum tau HTML konfirmasinya, kita assume success "Pending" dulu
+	// Nanti Anda perlu inspect modal konfirmasinya (Tombol "Lanjut" atau "Bayar")
+	
+	log.Println("✅ Tombol Query Buyer diklik. Menunggu respons...")
+	time.Sleep(2 * time.Second) 
+	
+	// Screenshot untuk melihat apa yang terjadi setelah klik tombol
+	s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_after_submit.png")})
+
+	return "TRX-" + fmt.Sprintf("%d", time.Now().Unix()), nil
 }

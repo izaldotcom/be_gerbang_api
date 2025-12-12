@@ -35,5 +35,5 @@ func main() {
 	log.Println("🎉 Login Berhasil! Bot akan tetap terbuka selama 10 detik agar Anda bisa lihat hasilnya.")
 	
 	// Tahan browser sebentar biar bisa dilihat (jangan langsung close)
-	svc.Page.WaitForTimeout(10000) 
+	svc.Page.WaitForTimeout(300000) 
 }
