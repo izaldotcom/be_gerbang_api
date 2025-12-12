@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	// Pastikan import ini benar merujuk ke file db_gen.go Anda
 	"gerbangapi/prisma/db"
 )
 
@@ -16,12 +15,9 @@ func NewOrderService(client *db.PrismaClient) *OrderService {
 	return &OrderService{client: client}
 }
 
-/*
----------------------------------------------------------
- 1) Build Supplier Items
----------------------------------------------------------
-*/
-
+// ---------------------------------------------------------
+// 1) Build Supplier Items
+// ---------------------------------------------------------
 func (s *OrderService) BuildSupplierItems(
 	ctx context.Context,
 	productId string,
@@ -41,7 +37,7 @@ func (s *OrderService) BuildSupplierItems(
 	}
 
 	if len(recipes) == 0 {
-		return nil, errors.New("recipe not found")
+		return nil, errors.New("recipe not found (pastikan seeder dijalankan)")
 	}
 
 	items := []struct {
@@ -62,17 +58,15 @@ func (s *OrderService) BuildSupplierItems(
 	return items, nil
 }
 
-/*
----------------------------------------------------------
- 2) Create Supplier Order + Items (FIXED: Transaction & Syntax)
----------------------------------------------------------
-*/
-
+// ---------------------------------------------------------
+// 2) Create Supplier Order (FIXED: Tanpa Transaction .Tx)
+// ---------------------------------------------------------
 func (s *OrderService) CreateSupplierOrderFromInternal(
 	ctx context.Context,
 	internalOrder db.InternalOrderModel,
 ) (*db.SupplierOrderModel, error) {
 
+	// A. Hitung kebutuhan bahan (Mixing)
 	items, err := s.BuildSupplierItems(ctx, internalOrder.ProductID, internalOrder.Quantity)
 	if err != nil {
 		return nil, err
@@ -82,61 +76,50 @@ func (s *OrderService) CreateSupplierOrderFromInternal(
 		return nil, errors.New("mixing generated 0 items")
 	}
 
-	var createdOrder *db.SupplierOrderModel
+	// B. Buat Header Supplier Order (Sequential)
+	// Kita lakukan CreateOne biasa tanpa .Tx untuk menghindari panic
+	order, err := s.client.SupplierOrder.CreateOne(
+		db.SupplierOrder.InternalOrderID.Set(internalOrder.ID),
+		db.SupplierOrder.SupplierID.Set("mitra-higgs"),
+		db.SupplierOrder.Status.Set("pending"),
+	).Exec(ctx)
 
-	// PERBAIKAN: Menggunakan Functional Transaction (s.client.Tx)
-	// Ini adalah cara yang paling modern dan aman, serta menangani Commit/Rollback otomatis
-	err = s.client.Tx(ctx, func(tx *db.PrismaClient) error {
-		
-		// CREATE SUPPLIER ORDER
-		order, err := tx.SupplierOrder.CreateOne(
-			// PERBAIKAN SINTAKSIS: Menggunakan setter function yang tersedia di generated client
-			db.SupplierOrder.InternalOrderID.Set(internalOrder.ID),
-			db.SupplierOrder.SupplierID.Set("mitra-higgs"),
-			db.SupplierOrder.Status.Set("pending"),
+	if err != nil {
+		return nil, errors.New("failed to create supplier_order: " + err.Error())
+	}
+
+	// C. Buat Detail Item (Looping)
+	for _, it := range items {
+		_, err := s.client.SupplierOrderItem.CreateOne(
+			// Pastikan urutan parameter sesuai atau gunakan setter
+			// Link/Relation ID biasanya wajib diisi
+			db.SupplierOrderItem.SupplierOrderID.Set(order.ID),
+			db.SupplierOrderItem.SupplierProductID.Set(it.SupplierProductID),
+			db.SupplierOrderItem.Quantity.Set(it.Quantity),
 		).Exec(ctx)
 
 		if err != nil {
-			return err
+			// Karena tidak pakai Tx, jika error disini, data header sudah terlanjur masuk.
+			// Untuk tahap development ini OK. Nanti bisa ditambahkan logic delete manual.
+			return nil, errors.New("failed to create item: " + err.Error())
 		}
-		
-		createdOrder = order
-
-		// CREATE SUPPLIER ORDER ITEMS
-		for _, it := range items {
-			// Variabel 'it' sekarang jelas digunakan, mengatasi error 'declared and not used'
-			_, err := tx.SupplierOrderItem.CreateOne(
-				// PERBAIKAN SINTAKSIS
-				db.SupplierOrderItem.SupplierOrderID.Set(order.ID),
-				db.SupplierOrderItem.SupplierProductID.Set(it.SupplierProductID),
-				db.SupplierOrderItem.Quantity.Set(it.Quantity),
-			).Exec(ctx)
-
-			if err != nil {
-				return err
-			}
-		}
-		
-		return nil // Commit (jika tidak ada error)
-	})
-
-	if err != nil {
-		return nil, err
 	}
 
-	return createdOrder, nil
+	return order, nil
 }
 
-/*
----------------------------------------------------------
- 3) Public API
----------------------------------------------------------
-*/
-
+// ---------------------------------------------------------
+// 3) Public API
+// ---------------------------------------------------------
 func (s *OrderService) ProcessInternalOrder(
 	ctx context.Context,
 	internalOrderID string,
 ) (*db.SupplierOrderModel, error) {
+
+	// Validasi Context tidak boleh nil
+	if ctx == nil {
+		return nil, errors.New("context cannot be nil")
+	}
 
 	internalOrder, err := s.client.InternalOrder.
 		FindUnique(

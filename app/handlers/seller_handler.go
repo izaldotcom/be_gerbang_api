@@ -74,7 +74,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	// 2) MIXING (OrderService)
 	// ======================================================
-	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(nil, internalOrderID)
+	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(c.Request().Context(), internalOrderID)
 	if mixErr != nil {
 		return c.JSON(500, echo.Map{"error": mixErr.Error()})
 	}
