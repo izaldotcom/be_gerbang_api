@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
 
 	"gerbangapi/app/handlers"
 	mid "gerbangapi/app/middleware"
@@ -17,10 +19,17 @@ func main() {
 	// 1. Load file .env
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
+		log.Println("⚠️  Warning: .env file not found. Menggunakan environment system variables.")
 	} else {
 		log.Println("✅ .env file loaded successfully.")
 	}
+
+	// 1.1. Tentukan Port
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	serverAddress := fmt.Sprintf(":%s", port)
 
 	// Create Echo instance
 	e := echo.New()
@@ -55,28 +64,35 @@ func main() {
 	db.ConnectRedis()
 
 	// ---------------------------------------------------------
-	// 4️⃣ HANDLERS & ROUTING
+	// 4️⃣ HANDLERS & ROUTING (Dependency Injection)
 	// ---------------------------------------------------------
 
 	// 4.1. Initialize Services
+	// ✅ FIX: Inisialisasi Auth Service dengan client DB
+	authService := services.NewAuthService(client)
 	orderService := services.NewOrderService(client)
-	
-	// 4.2. Initialize Handlers (SellerHandler requires DB and OrderService)
+
+	// 4.2. Initialize Handlers
+	// ✅ FIX: Inisialisasi Auth Handler dengan Auth Service
+	authHandler := handlers.NewAuthHandler(authService)
 	sellerHandler := handlers.NewSellerHandler(client, orderService)
 
 	// 5️⃣ Routing Grouping
 	v1 := e.Group("/api/v1")
 
-	// === A. PUBLIC ROUTES (Asumsi ini adalah fungsi standalone) ===
-	v1.POST("/register", handlers.RegisterUser)
-	v1.POST("/login", handlers.LoginUser)
-	v1.POST("/refresh-token", handlers.RefreshToken)
+	// === A. PUBLIC ROUTES ===
+	// ✅ FIX: Gunakan method dari authHandler (instance), bukan fungsi package langsung
+	v1.POST("/register", authHandler.RegisterUser)
+	v1.POST("/login", authHandler.LoginUser)
+	// Pastikan RefreshToken juga ada di AuthHandler jika logic-nya butuh DB
+	// Jika RefreshToken function mandiri, biarkan, tapi biasanya butuh DB:
+	// v1.POST("/refresh-token", authHandler.RefreshToken) 
+	v1.POST("/refresh-token", authHandler.RefreshToken)
 
 	// === B. USER PROTECTED ROUTES ===
 	userGroup := v1.Group("")
-	
-	// FIX: Panggil tanpa argumen, sesuai error kompilasi
-	userGroup.Use(mid.JWTMiddleware()) 
+
+	userGroup.Use(mid.JWTMiddleware())
 
 	userGroup.GET("/get-profile", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{
@@ -90,19 +106,14 @@ func main() {
 	sellerGroup := v1.Group("/seller")
 	sellerGroup.Use(mid.SellerSecurityMiddleware(client))
 
-	// Menggunakan instance sellerHandler untuk memanggil metodenya
-	sellerGroup.GET("/products", sellerHandler.SellerProducts) 
+	sellerGroup.GET("/products", sellerHandler.SellerProducts)
 	sellerGroup.POST("/order", sellerHandler.SellerOrder)
-	
-	// Asumsi SellerStatus juga merupakan metode dari SellerHandler
-	// Karena SellerStatus tidak ada di kode handler sebelumnya, kita buat placeholder.
+
 	sellerGroup.GET("/status", func(c echo.Context) error {
-		// Jika Anda memiliki metode SellerStatus di SellerHandler, gunakan:
-		// sellerHandler.SellerStatus
 		return c.JSON(200, echo.Map{"message": "Seller status endpoint"})
 	})
 
 	// 6️⃣ Start server
-	log.Println("🚀 Server running on http://localhost:8080")
-	e.Logger.Fatal(e.Start(":8080"))
+	log.Printf("🚀 Server running on http://localhost%s", serverAddress)
+	e.Logger.Fatal(e.Start(serverAddress))
 }

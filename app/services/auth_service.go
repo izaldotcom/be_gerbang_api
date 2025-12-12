@@ -13,6 +13,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// Struct Service utama
+type AuthService struct {
+	DB *db.PrismaClient
+}
+
+// Constructor (Wajib ada untuk main.go)
+func NewAuthService(dbClient *db.PrismaClient) *AuthService {
+	return &AuthService{
+		DB: dbClient,
+	}
+}
+
+// --- STRUCTS UNTUK DATA TRANSFER ---
+
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -24,60 +38,90 @@ type JwtClaims struct {
 	jwt.RegisteredClaims
 }
 
-func Register(ctx context.Context, client *db.PrismaClient,
-	id, role_id, name, email, phone, status, password string) error {
+// Input Struct agar rapi saat dipanggil dari Handler
+type RegisterInput struct {
+	ID       string
+	RoleID   string
+	Name     string
+	Email    string
+	Phone    string
+	Status   string
+	Password string
+}
 
-	if id == "" {
-		id = uuid.New().String()
+type LoginInput struct {
+	Email    string
+	Password string
+}
+
+// --- METHODS ---
+
+// Register sekarang menjadi method dari *AuthService
+func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
+
+	// Logika ID Default jika kosong
+	if input.ID == "" {
+		input.ID = uuid.New().String()
 	}
 
-	hashed, _ := utils.HashPassword(password)
+	// Hash Password menggunakan utils Anda
+	hashed, _ := utils.HashPassword(input.Password)
 
-	_, err := client.User.CreateOne(
-		db.User.Name.Set(name),       
-		db.User.Email.Set(email),     
-		db.User.Password.Set(hashed), 
+	// Simpan ke DB
+	_, err := s.DB.User.CreateOne(
+		db.User.Name.Set(input.Name),
+		db.User.Email.Set(input.Email),
+		db.User.Password.Set(hashed),
+
+		// Field Opsional / Variadic
+		db.User.ID.Set(input.ID),
 		
-		// Variadic / Opsional
-		db.User.ID.Set(id),
-		db.User.RoleID.Set(role_id),
-		db.User.Phone.Set(phone),
-		db.User.Status.Set(status),
+		// Pastikan RoleID tidak kosong jika skema DB mewajibkannya, 
+		// atau gunakan logic default string "user" jika kosong
+		db.User.RoleID.Set(input.RoleID), 
+		
+		db.User.Phone.Set(input.Phone),
+		db.User.Status.Set(input.Status),
 	).Exec(ctx)
 
 	return err
 }
 
-func Login(ctx context.Context, client *db.PrismaClient, email, password string) (*TokenResponse, error) {
-	user, err := client.User.FindUnique(
-		db.User.Email.Equals(email),
+// Login sekarang menjadi method dari *AuthService
+func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenResponse, error) {
+	// 1. Cari User
+	user, err := s.DB.User.FindUnique(
+		db.User.Email.Equals(input.Email),
 	).Exec(ctx)
 
 	if err != nil || user == nil {
 		return nil, errors.New("email not found")
 	}
 
-	if !utils.CheckPassword(user.Password, password) {
+	// 2. Cek Password menggunakan utils Anda
+	if !utils.CheckPassword(user.Password, input.Password) {
 		return nil, errors.New("invalid password")
 	}
 
-	accessToken, err := generateAccessToken(user.ID, user.Email)
+	// 3. Generate Access Token
+	accessToken, err := s.generateAccessToken(user.ID, user.Email)
 	if err != nil {
 		return nil, err
 	}
 
+	// 4. Generate Refresh Token
 	refreshTokenStr := uuid.New().String()
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 
-	// 👇 PERBAIKAN DI SINI: Gunakan .Link() untuk relasi
-	_, err = client.RefreshToken.CreateOne(
+	// Simpan Refresh Token ke DB (Mempertahankan logika .Link Anda)
+	_, err = s.DB.RefreshToken.CreateOne(
 		db.RefreshToken.Token.Set(refreshTokenStr),
-		
-		// Masukkan Relasi User via Link
+
+		// Masukkan Relasi User via Link (Sesuai kode existing Anda)
 		db.RefreshToken.User.Link(
 			db.User.ID.Equals(user.ID),
 		),
-		
+
 		db.RefreshToken.ExpiresAt.Set(expiresAt),
 	).Exec(ctx)
 
@@ -91,20 +135,9 @@ func Login(ctx context.Context, client *db.PrismaClient, email, password string)
 	}, nil
 }
 
-func generateAccessToken(userID, email string) (string, error) {
-	claims := &JwtClaims{
-		UserID: userID,
-		Email:  email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
-}
-
-func RefreshTokenProcess(ctx context.Context, client *db.PrismaClient, refreshTokenInput string) (string, error) {
-	storedToken, err := client.RefreshToken.FindUnique(
+// RefreshTokenProcess method
+func (s *AuthService) RefreshTokenProcess(ctx context.Context, refreshTokenInput string) (string, error) {
+	storedToken, err := s.DB.RefreshToken.FindUnique(
 		db.RefreshToken.Token.Equals(refreshTokenInput),
 	).With(
 		db.RefreshToken.User.Fetch(),
@@ -119,7 +152,20 @@ func RefreshTokenProcess(ctx context.Context, client *db.PrismaClient, refreshTo
 	}
 
 	user := storedToken.User()
-	newAccessToken, err := generateAccessToken(user.ID, user.Email)
-	
+	newAccessToken, err := s.generateAccessToken(user.ID, user.Email)
+
 	return newAccessToken, err
+}
+
+// Helper Private Method
+func (s *AuthService) generateAccessToken(userID, email string) (string, error) {
+	claims := &JwtClaims{
+		UserID: userID,
+		Email:  email,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 }

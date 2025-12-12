@@ -2,27 +2,45 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"time"
+	"os"
 
 	"github.com/redis/go-redis/v9"
 )
 
+// ✅ PENTING: Gunakan Huruf Besar 'R' agar bisa diakses dari package lain (Exported)
 var Rdb *redis.Client
 
 func ConnectRedis() {
+	// Ambil konfigurasi dari .env atau default
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
+
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+
+	addr := fmt.Sprintf("%s:%s", redisHost, redisPort)
+
+	// Inisialisasi Client Redis
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379", // Pastikan Redis sudah jalan
-		Password: "",               // No password set
-		DB:       0,                // Use default DB
+		Addr:     addr,
+		Password: redisPassword, // kosongkan jika tidak ada password
+		DB:       0,             // use default DB
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err := Rdb.Ping(ctx).Result()
+	// Test Koneksi
+	_, err := Rdb.Ping(context.Background()).Result()
 	if err != nil {
-		log.Fatal("❌ Gagal connect Redis:", err)
+		log.Printf("⚠️  Warning: Gagal connect ke Redis di %s: %v", addr, err)
+		log.Println("➡️  Fitur yang butuh Redis (seperti Scraper) mungkin error.")
+	} else {
+		log.Printf("✅ Redis connected at %s", addr)
 	}
-	log.Println("✅ Redis connected successfully!")
 }

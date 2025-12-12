@@ -63,6 +63,7 @@ model ApiKey {
 model Supplier {
   id           String              @id @default(uuid())
   name         String
+  code         String   @default("DEFAULT")
   type         String
   base_url     String?
   status       Boolean             @default(true)
@@ -140,6 +141,8 @@ model RolePermission {
 
 model SupplierProduct {
   id           String   @id @default(uuid())
+  supplierProductID String @map("supplier_product_id")
+  price             Int    @default(0)
   supplier_id  String
   name         String
   denom        Int

@@ -1,20 +1,27 @@
 package handlers
 
 import (
-	"context"
+	"net/http"
+
 	"gerbangapi/app/services"
-	"gerbangapi/prisma/db"
 
 	"github.com/labstack/echo/v4"
 )
 
-var client *db.PrismaClient
-
-func SetPrismaClient(c *db.PrismaClient) {
-	client = c
+type AuthHandler struct {
+	Service *services.AuthService
 }
 
-func RegisterUser(c echo.Context) error {
+// ✅ Constructor (Dipanggil di main.go)
+func NewAuthHandler(service *services.AuthService) *AuthHandler {
+	return &AuthHandler{
+		Service: service,
+	}
+}
+
+// --- REGISTER ---
+func (h *AuthHandler) RegisterUser(c echo.Context) error {
+	// Request Struct sesuai kebutuhan input JSON
 	type Req struct {
 		ID       string `json:"id"`
 		RoleID   string `json:"role_id"`
@@ -27,24 +34,32 @@ func RegisterUser(c echo.Context) error {
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request payload"})
 	}
 
-	err := services.Register(
-		context.Background(),
-		client,
-		req.ID, req.RoleID, req.Name,
-		req.Email, req.Phone, req.Status, req.Password,
-	)
+	// Mapping dari Req Handler -> Input Service Struct
+	input := services.RegisterInput{
+		ID:       req.ID,
+		RoleID:   req.RoleID,
+		Name:     req.Name,
+		Email:    req.Email,
+		Phone:    req.Phone,
+		Status:   req.Status,
+		Password: req.Password,
+	}
+
+	// Panggil Service (Sekarang menggunakan Method, bukan fungsi static)
+	err := h.Service.Register(c.Request().Context(), input)
 
 	if err != nil {
-		return c.JSON(400, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
 	}
 
-	return c.JSON(200, echo.Map{"message": "register success"})
+	return c.JSON(http.StatusCreated, echo.Map{"message": "register success"})
 }
 
-func LoginUser(c echo.Context) error {
+// --- LOGIN ---
+func (h *AuthHandler) LoginUser(c echo.Context) error {
 	type Req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -52,40 +67,45 @@ func LoginUser(c echo.Context) error {
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request payload"})
 	}
 
-	// Token sekarang berupa Struct (Access & Refresh)
-	tokenResp, err := services.Login(context.Background(), client, req.Email, req.Password)
+	// Panggil Service Login
+	tokenResp, err := h.Service.Login(c.Request().Context(), services.LoginInput{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+
 	if err != nil {
-		return c.JSON(401, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": err.Error()})
 	}
 
-	return c.JSON(200, echo.Map{
+	return c.JSON(http.StatusOK, echo.Map{
 		"message":       "login success",
 		"access_token":  tokenResp.AccessToken,
 		"refresh_token": tokenResp.RefreshToken,
 	})
 }
 
-// 👇 INI YANG KEMARIN BELUM ADA
-func RefreshToken(c echo.Context) error {
+// --- REFRESH TOKEN ---
+// Sekarang menjadi Method agar bisa akses DB via Service
+func (h *AuthHandler) RefreshToken(c echo.Context) error {
 	type Req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
 	}
 
-	// Panggil service RefreshTokenProcess
-	newAccessToken, err := services.RefreshTokenProcess(context.Background(), client, req.RefreshToken)
+	// Panggil Service RefreshTokenProcess
+	newAccessToken, err := h.Service.RefreshTokenProcess(c.Request().Context(), req.RefreshToken)
 	if err != nil {
-		return c.JSON(401, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": err.Error()})
 	}
 
-	return c.JSON(200, echo.Map{
+	return c.JSON(http.StatusOK, echo.Map{
 		"access_token": newAccessToken,
 	})
 }
