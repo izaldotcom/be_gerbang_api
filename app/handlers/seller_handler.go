@@ -57,18 +57,17 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	internalOrderID := uuid.New().String()
 
-	// FIX: ExecuteRaw hanya mengembalikan QueryExec, kita panggil .Exec() untuk menjalankan.
 	_, err := h.DB.Prisma.ExecuteRaw(
-			`INSERT INTO internal_order 
+		`INSERT INTO internal_order 
 			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
 			VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())`,
-			internalOrderID, req.ProductID, req.Destination, 1,
+		internalOrderID, req.ProductID, req.Destination, 1,
 	).Exec(c.Request().Context())
 
 	if err != nil {
-			return c.JSON(500, echo.Map{
-					"error": "Failed inserting internal_order: " + err.Error(),
-			})
+		return c.JSON(500, echo.Map{
+			"error": "Failed inserting internal_order: " + err.Error(),
+		})
 	}
 
 	// ======================================================
@@ -84,52 +83,60 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	svc, err := scraper.NewMitraHiggsService()
 	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Browser init failed"})
+		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
 	}
 	defer svc.Close()
 
 	if err := svc.Login(os.Getenv("MH_USERNAME"), os.Getenv("MH_PASSWORD")); err != nil {
-		return c.JSON(502, echo.Map{"error": "Provider login failed"})
+		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})
 	}
 
 	// ======================================================
-	// 4) GET supplier_order_item (FIXED: Menggunakan Exec(context, &target))
+	// 4) GET supplier_order_item & Quantity
 	// ======================================================
-
-	var items []map[string]interface{}
+	// FIX: Update Query untuk mengambil 'quantity' juga
 	
-	queryExec := h.DB.Prisma.QueryRaw(
-        `SELECT sp.supplier_product_id 
-         FROM supplier_product sp
-         JOIN supplier_order_item soi ON soi.supplier_product_id = sp.id
-         WHERE soi.supplier_order_id = ? 
-         LIMIT 1`,
-        supplierOrder.ID,
-    )
+	var items []map[string]interface{}
 
-	// FIX: Panggil Exec dengan 2 argumen (context dan pointer ke target slice)
-	// dan tangkap error-nya saja, karena Exec hanya mengembalikan 1 nilai (error).
+	queryExec := h.DB.Prisma.QueryRaw(
+		`SELECT sp.supplier_product_id, soi.quantity 
+		 FROM supplier_product sp
+		 JOIN supplier_order_item soi ON soi.supplier_product_id = sp.id
+		 WHERE soi.supplier_order_id = ? 
+		 LIMIT 1`,
+		supplierOrder.ID,
+	)
+
 	queryErr := queryExec.Exec(c.Request().Context(), &items)
 
-	// Check if there was an error in the query result
 	if queryErr != nil {
 		return c.JSON(500, echo.Map{"error": "Query supplier_order_item failed: " + queryErr.Error()})
 	}
 
-	// Ensure data is available in the result
 	if len(items) == 0 {
 		return c.JSON(500, echo.Map{"error": "No supplier_order_item"})
 	}
 
 	nominalID := items[0]["supplier_product_id"].(string)
+	
+	// FIX: Ambil quantity dari hasil query (logic sama seperti worker)
+	var repeatCount int
+	if qtyFloat, ok := items[0]["quantity"].(float64); ok {
+		repeatCount = int(qtyFloat)
+	} else if qtyInt, ok := items[0]["quantity"].(int64); ok {
+		repeatCount = int(qtyInt)
+	} else {
+		repeatCount = 1
+	}
 
 	// ======================================================
 	// 5) Scraper PlaceOrder
 	// ======================================================
-	trxID, err := svc.PlaceOrder(req.Destination, nominalID)
+	// FIX: Kirim repeatCount sebagai parameter ketiga
+	trxID, err := svc.PlaceOrder(req.Destination, nominalID, repeatCount)
+	
 	if err != nil {
 		// supplier_order FAILED
-		// FIX: Tambahkan .Exec(Context) untuk semua raw query yang menjalankan update.
 		h.DB.Prisma.ExecuteRaw(
 			"UPDATE supplier_order SET status='failed', last_error=? WHERE id=?",
 			err.Error(),
@@ -147,13 +154,11 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	// 6) Mark SUCCESS
 	// ======================================================
-	// FIX: Tambahkan .Exec(Context)
 	h.DB.Prisma.ExecuteRaw(
 		"UPDATE supplier_order SET status='success' WHERE id=?",
 		supplierOrder.ID,
 	).Exec(c.Request().Context())
 
-	// FIX: Tambahkan .Exec(Context)
 	h.DB.Prisma.ExecuteRaw(
 		"UPDATE internal_order SET status='success' WHERE id=?",
 		internalOrderID,
@@ -168,6 +173,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		"supplier_order":  supplierOrder.ID,
 		"provider_trx_id": trxID,
 		"destination":     req.Destination,
+		"quantity_loop":   repeatCount,
 		"status":          "success",
 	})
 }

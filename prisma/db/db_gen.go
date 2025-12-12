@@ -50618,6 +50618,16 @@ type supplierProductSetParam struct {
 	data builder.Field
 }
 
+// getQuery implements SupplierProductWithPrismaSupplierProductIDSetParam.
+func (p supplierProductSetParam) getQuery() builder.Query {
+	panic("unimplemented")
+}
+
+// supplierProductIDField implements SupplierProductWithPrismaSupplierProductIDSetParam.
+func (p supplierProductSetParam) supplierProductIDField() {
+	panic("unimplemented")
+}
+
 func (supplierProductSetParam) settable() {}
 
 func (p supplierProductSetParam) field() builder.Field {
@@ -50722,6 +50732,11 @@ type SupplierProductWithPrismaSupplierProductIDSetParam interface {
 type supplierProductWithPrismaSupplierProductIDSetParam struct {
 	data  builder.Field
 	query builder.Query
+}
+
+// denomField implements SupplierProductWithPrismaDenomSetParam.
+func (p supplierProductWithPrismaSupplierProductIDSetParam) denomField() {
+	panic("unimplemented")
 }
 
 // costPriceField implements SupplierProductWithPrismaCostPriceSetParam.
@@ -51046,6 +51061,11 @@ type supplierProductWithPrismaDenomSetParam struct {
 	query builder.Query
 }
 
+// costPriceField implements SupplierProductWithPrismaCostPriceSetParam.
+func (p supplierProductWithPrismaDenomSetParam) costPriceField() {
+	panic("unimplemented")
+}
+
 // nameField implements SupplierProductWithPrismaNameSetParam.
 func (p supplierProductWithPrismaDenomSetParam) nameField() {
 	panic("unimplemented")
@@ -51127,6 +51147,11 @@ type SupplierProductWithPrismaCostPriceSetParam interface {
 type supplierProductWithPrismaCostPriceSetParam struct {
 	data  builder.Field
 	query builder.Query
+}
+
+// supplierField implements SupplierProductWithPrismaSupplierSetParam.
+func (p supplierProductWithPrismaCostPriceSetParam) supplierField() {
+	panic("unimplemented")
 }
 
 // supplierProductIDField implements SupplierProductWithPrismaSupplierProductIDSetParam.
@@ -51831,6 +51856,16 @@ type productSetParam struct {
 	data builder.Field
 }
 
+// getQuery implements ProductWithPrismaNameSetParam.
+func (p productSetParam) getQuery() builder.Query {
+	panic("unimplemented")
+}
+
+// nameField implements ProductWithPrismaNameSetParam.
+func (p productSetParam) nameField() {
+	panic("unimplemented")
+}
+
 func (productSetParam) settable() {}
 
 func (p productSetParam) field() builder.Field {
@@ -51935,6 +51970,11 @@ type ProductWithPrismaNameSetParam interface {
 type productWithPrismaNameSetParam struct {
 	data  builder.Field
 	query builder.Query
+}
+
+// denomField implements ProductWithPrismaDenomSetParam.
+func (p productWithPrismaNameSetParam) denomField() {
+	panic("unimplemented")
 }
 
 func (p productWithPrismaNameSetParam) field() builder.Field {

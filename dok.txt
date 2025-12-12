@@ -1,0 +1,30 @@
+https://mitrahiggs.com/trade/queryBuyer
+
+payload
+buyerId 12345678
+
+{
+    "code": 0,
+    "errMsg": "",
+    "data": {
+        "nickName": "2014817",
+        "userId": 12345678
+    }
+}
+
+{
+    "code": 3001,
+    "errMsg": "user tidak ada",
+    "data": null
+}
+
+https://mitrahiggs.com/trade/sellCard
+itemId=6&buyerId=3145526
+itemId
+buyerId
+
+{
+    "code": 0,
+    "errMsg": "",
+    "data": null
+}

@@ -174,98 +174,129 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	return nil
 }
 
-// === PLACE ORDER (FIX: TOMBOL BELI VIA JS) ===
-func (s *MitraHiggsService) PlaceOrder(playerID, productID string) (string, error) {
-	log.Printf("🛒 Memulai Transaksi: Player %s, Item ID %s", playerID, productID)
+// === PLACE ORDER (FIX: KLIK TOMBOL CONFIRM FISIK) ===
+func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int) (string, error) {
+	log.Printf("🛒 Memulai %d Transaksi untuk Player %s (Item %s)", quantity, playerID, productID)
 
-	// 1. TUNGGU HALAMAN STABIL
-	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State: playwright.LoadStateDomcontentloaded,
-	})
+	// 1. Persiapan Awal
+	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{State: playwright.LoadStateDomcontentloaded})
 	
-	// Handle Popup (Best Effort)
+	// Handle Popup
 	if vis, _ := s.Page.Locator("#thickdivInvitation").IsVisible(); vis {
 		s.Page.Locator("#thickdivInvitation").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// 2. INPUT ID PLAYER (JS INJECTION)
-	log.Println("💉 Menyuntikkan ID via JavaScript...")
-	jsScript := fmt.Sprintf(`(() => {
+	// 2. INJECT ID PLAYER
+	log.Println("💉 Injecting Player ID...")
+	jsInjectID := fmt.Sprintf(`(() => {
 		var input = document.getElementById('buyerId');
 		if (input) {
 			input.value = '%s';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
-			input.dispatchEvent(new Event('change', { bubbles: true }));
 			return true;
 		}
 		return false;
 	})()`, playerID)
-
-	if _, err := s.Page.Evaluate(jsScript); err != nil {
+	
+	if _, err := s.Page.Evaluate(jsInjectID); err != nil {
 		return "", fmt.Errorf("gagal inject ID: %v", err)
 	}
 
 	// 3. PILIH PRODUK
 	itemSelector := fmt.Sprintf("#itemId_%s", productID)
-	log.Printf("👉 Memilih produk: %s", itemSelector)
-	
-	// Cek keberadaan produk
-	if count, _ := s.Page.Locator(itemSelector).Count(); count == 0 {
-		return "", fmt.Errorf("produk ID #itemId_%s tidak ditemukan (Cek Seeder Database Anda)", productID)
+	if err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)}); err != nil {
+		return "", fmt.Errorf("produk ID %s tidak ditemukan", productID)
 	}
 
-	// Klik Produk (Force)
-	err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{
-		Force: playwright.Bool(true),
-	})
-	if err != nil {
-		return "", fmt.Errorf("gagal klik produk: %v", err)
-	}
+	// 4. LOOPING TRANSAKSI
+	var successTrx []string
 	
-	time.Sleep(500 * time.Millisecond)
+	for i := 1; i <= quantity; i++ {
+		log.Printf("🔄 Proses Transaksi ke-%d dari %d...", i, quantity)
 
-	// ============================================================
-	// 4. SUBMIT ORDER (FIX UTAMA: JS EXECUTION)
-	// ============================================================
-	// Target: <a onclick="Index.queryBuyer();" ...>
-	// Masalah: Element ini tidak punya text, hanya background image.
-	// Solusi: Kita panggil fungsi JS aslinya langsung, atau cari berdasarkan class.
-	
-	log.Println("🖱️ Mencoba Submit Order...")
-	
-	// STRATEGI 1: Cari elemen berdasarkan Class .buyBtns dan Klik
-	submitSelector := ".buyBtns"
-	
-	// Cek apakah elemen ada di DOM (tidak harus visible, kadang ketutup footer)
-	if count, _ := s.Page.Locator(submitSelector).Count(); count > 0 {
-		log.Println("   -> Tombol .buyBtns ditemukan, melakukan Force Click...")
-		err := s.Page.Locator(submitSelector).Click(playwright.LocatorClickOptions{
-			Force: playwright.Bool(true), // Force click walaupun element dianggap hidden/kosong
-		})
+		// ============================================================
+		// TAHAP A: QUERY / CEK USER
+		// ============================================================
+		// Kita panggil queryBuyer via JS (karena tombolnya kadang susah diklik)
+		_, err := s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) {}")
 		if err != nil {
-			log.Println("⚠️ Gagal klik tombol, mencoba Plan B (JS Exec)...")
-			// Plan B lanjut di bawah
+			// Ignore error query, lanjut validasi visual
 		}
-	} else {
-		log.Println("⚠️ Tombol .buyBtns tidak terdeteksi selector, mencoba Plan B (JS Exec)...")
+
+		// ============================================================
+		// TAHAP B: VALIDASI POPUP KONFIRMASI (TUNGGU NAMA MUNCUL)
+		// ============================================================
+		log.Println("⏳ Menunggu validasi user & tombol konfirmasi...")
+		
+		userIsValid := false
+		for attempt := 0; attempt < 8; attempt++ { // Tunggu max 4 detik
+			time.Sleep(500 * time.Millisecond)
+
+			// 1. Cek Error User
+			if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
+				txt, _ := s.Page.Locator("#publicTxt").InnerText()
+				if txt != "" {
+					s.Page.Evaluate("Common.close()")
+					return "", fmt.Errorf("TRANSAKSI GAGAL: %s", txt)
+				}
+			}
+
+			// 2. Cek Nama Muncul (#queryBuyerName)
+			if vis, _ := s.Page.Locator("#queryBuyerName").IsVisible(); vis {
+				userIsValid = true
+				break 
+			}
+		}
+
+		if !userIsValid {
+			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_timeout_validasi.png")})
+			return "", fmt.Errorf("timeout: nama player tidak muncul setelah query")
+		}
+
+		// ============================================================
+		// TAHAP C: EKSEKUSI FINAL (KLIK TOMBOL SELLITEM)
+		// ============================================================
+		// HTML Target: <a onclick="Index.sellItem();"></a>
+		// Kita cari elemen yang punya atribut onclick berisi 'Index.sellItem'
+		// Ini LEBIH AMAN daripada s.Page.Evaluate() karena memastikan tombolnya ada.
+		
+		log.Println("🚀 Mencari tombol Konfirmasi Beli...")
+		
+		sellBtnSelector := "a[onclick*='Index.sellItem']"
+		
+		// Tunggu tombol tersebut visible (biasanya muncul di modal/popup)
+		_, err = s.Page.WaitForSelector(sellBtnSelector, playwright.PageWaitForSelectorOptions{
+			State: playwright.WaitForSelectorStateVisible,
+			Timeout: playwright.Float(5000),
+		})
+
+		if err != nil {
+			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_sell_btn.png")})
+			return "", fmt.Errorf("tombol konfirmasi (Index.sellItem) tidak ditemukan")
+		}
+
+		// KLIK TOMBOL TERSEBUT
+		err = s.Page.Locator(sellBtnSelector).Click(playwright.LocatorClickOptions{
+			Force: playwright.Bool(true),
+		})
+		
+		if err != nil {
+			return "", fmt.Errorf("gagal klik tombol sellItem: %v", err)
+		}
+
+		// Sukses
+		trxID := fmt.Sprintf("TRX-%d-%d", time.Now().Unix(), i)
+		successTrx = append(successTrx, trxID)
+
+		log.Printf("✅ Transaksi ke-%d Berhasil diklik.", i)
+
+		// Jeda agar modal tertutup & siap transaksi berikutnya
+		time.Sleep(3 * time.Second) 
 	}
 
-	// STRATEGI 2 (PLAN B): Panggil fungsi JS website-nya langsung
-	// Ini meniru apa yang terjadi saat user klik tombol (onclick="Index.queryBuyer()")
-	log.Println("🚀 Eksekusi JS: Index.queryBuyer()...")
-	
-	_, err = s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) { console.error(e); }")
-	if err != nil {
-		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_submit_fail.png")})
-		return "", fmt.Errorf("gagal eksekusi Index.queryBuyer(): %v", err)
-	}
+	finalTrxString := fmt.Sprintf("%v", successTrx)
+	log.Println("🏁 Selesai. TRX:", finalTrxString)
 
-	log.Println("✅ Perintah Submit dikirim ke Browser.")
-	time.Sleep(2 * time.Second) 
-	
-	// Screenshot bukti sukses klik/submit
-	s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_after_submit.png")})
-
-	return "TRX-" + fmt.Sprintf("%d", time.Now().Unix()), nil
+	return finalTrxString, nil
 }

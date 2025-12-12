@@ -1,5 +1,3 @@
-// worker/mitrahiggs_worker.go
-
 package main
 
 import (
@@ -11,24 +9,35 @@ import (
 	"time"
 
 	"gerbangapi/app/services/scraper"
-	"gerbangapi/prisma/db" // Pastikan jalur import ke Prisma Client Anda benar
+	"gerbangapi/prisma/db"
+
+	"github.com/joho/godotenv"
 )
 
 // Gunakan context background untuk proses worker yang berjalan terus menerus
 var ctx = context.Background()
 
 func main() {
+	// Load env agar bisa baca MH_USERNAME/PASSWORD
+	if err := godotenv.Load(".env"); err != nil {
+		if err2 := godotenv.Load("../.env"); err2 != nil {
+			log.Println("⚠️  Warning: .env file not found. Menggunakan System Env.")
+		}
+	}
+
 	log.Println("🚀 Starting MitraHiggs Order Worker...")
 
-	// 1. Inisialisasi DB Client
-	// Pastikan Anda telah mengatur ENVIRONMENT VARIABLES yang dibutuhkan oleh Prisma Client
+	// 1. Inisialisasi DB Client & Redis
 	dbClient := db.NewClient()
 	if err := dbClient.Prisma.Connect(); err != nil {
 		log.Fatalf("Fatal Error: Failed to connect to database: %v", err)
 	}
 	defer dbClient.Prisma.Disconnect()
 	
-	log.Println("✅ Database Connected. Worker is running...")
+	// Pastikan Redis juga connect (Penting untuk cookie scraper)
+	db.ConnectRedis()
+
+	log.Println("✅ Database & Redis Connected. Worker is running...")
 
 	// Worker akan berputar terus menerus
 	for {
@@ -56,7 +65,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient) error {
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			// Ini bukan error fatal, hanya tidak ada antrian
-			// log.Println("🧘 No pending orders. Resting...") // Komen ini agar log tidak terlalu ramai
+			// log.Println("🧘 No pending orders. Resting...") 
 			return nil 
 		}
 		return fmt.Errorf("failed to fetch pending order: %v", err)
@@ -114,8 +123,6 @@ func processNextSupplierOrder(dbClient *db.PrismaClient) error {
 		supplierOrder.InternalOrderID,
 	).Exec(ctx)
 
-	// TODO: (Minggu 4) Lakukan Webhook Callback di sini jika sudah diimplementasikan
-	
 	return nil
 }
 
@@ -123,13 +130,20 @@ func processNextSupplierOrder(dbClient *db.PrismaClient) error {
 // executeScrapingOrder menangani seluruh alur Playwright untuk order yang diberikan.
 func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierOrderModel) error {
 	
-	// 1. Ambil Item & Destination
+	// 1. Ambil Item & Quantity dari Supplier Order Item
+	// Kita gunakan QueryRaw dengan JOIN untuk mendapatkan:
+	// - supplier_product_id (ID HTML: '1' atau '6')
+	// - quantity (Jumlah pengulangan transaksi)
 	
-	// Ambil Item yang dibutuhkan: supplier_product_id
 	var items []map[string]interface{}
+	
+	// Query ini mengambil ID HTML yang benar dari tabel supplier_product
 	queryExec := dbClient.Prisma.QueryRaw(
-		// Asumsi hanya ada 1 item per supplier order
-		"SELECT supplier_product_id FROM supplier_order_item WHERE supplier_order_id = ? LIMIT 1",
+		`SELECT sp.supplier_product_id, soi.quantity 
+		 FROM supplier_order_item soi
+		 JOIN supplier_product sp ON soi.supplier_product_id = sp.id
+		 WHERE soi.supplier_order_id = ? 
+		 LIMIT 1`,
 		supplierOrder.ID,
 	)
 	
@@ -141,9 +155,20 @@ func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierO
 		return errors.New("no supplier product item found for this order")
 	}
 
-	nominalID := items[0]["supplier_product_id"].(string)
+	// Parsing Hasil Query
+	productHTMLID := items[0]["supplier_product_id"].(string) // "1" atau "6"
+	
+	// Parsing Quantity (bisa float64 karena JSON number)
+	var repeatCount int
+	if qtyFloat, ok := items[0]["quantity"].(float64); ok {
+		repeatCount = int(qtyFloat)
+	} else if qtyInt, ok := items[0]["quantity"].(int64); ok {
+		repeatCount = int(qtyInt)
+	} else {
+		repeatCount = 1 // Default
+	}
 
-	// Ambil Destination (Buyer UID) dari InternalOrder
+	// 2. Ambil Destination (Buyer UID) dari InternalOrder
 	internalOrder, err := dbClient.InternalOrder.FindUnique(
 		db.InternalOrder.ID.Equals(supplierOrder.InternalOrderID),
 	).Exec(ctx)
@@ -154,14 +179,14 @@ func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierO
 
 	playerID := internalOrder.BuyerUID
 
-	// 2. Inisialisasi Scraper Service
+	// 3. Inisialisasi Scraper Service
 	svc, err := scraper.NewMitraHiggsService()
 	if err != nil {
 		return fmt.Errorf("browser init failed: %v", err)
 	}
 	defer svc.Close()
 	
-	// 3. Login
+	// 4. Login
 	log.Printf("   -> Logging in with MH_USERNAME...")
 	mhUsername := os.Getenv("MH_USERNAME")
 	mhPassword := os.Getenv("MH_PASSWORD")
@@ -174,24 +199,25 @@ func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierO
 		return fmt.Errorf("provider login failed: %v", err)
 	}
 	
-	// 4. Place Order
-	log.Printf("   -> Placing order for Player: %s, Product: %s", playerID, nominalID)
-	trxID, err := svc.PlaceOrder(playerID, nominalID)
+	// 5. Place Order (Looping sesuai Quantity)
+	log.Printf("   -> Placing order for Player: %s, ItemID: %s, Qty: %d", playerID, productHTMLID, repeatCount)
+	
+	// Panggil PlaceOrder dengan parameter Quantity
+	trxIDs, err := svc.PlaceOrder(playerID, productHTMLID, repeatCount)
 	
 	if err != nil {
 		return fmt.Errorf("mitrahiggs place order failed: %v", err)
 	}
 	
-	// 5. Simpan provider_trx_id
+	// 6. Simpan provider_trx_id
 	_, err = dbClient.Prisma.ExecuteRaw(
 		"UPDATE supplier_order SET provider_trx_id=? WHERE id=?",
-		trxID,
+		trxIDs,
 		supplierOrder.ID,
 	).Exec(ctx)
 
 	if err != nil {
-		// Ini bukan error yang membatalkan order, tapi harus di-log
-		log.Printf("   -> WARNING: Failed to save provider_trx_id %s: %v", trxID, err)
+		log.Printf("   -> WARNING: Failed to save provider_trx_id %s: %v", trxIDs, err)
 	}
 	
 	return nil
