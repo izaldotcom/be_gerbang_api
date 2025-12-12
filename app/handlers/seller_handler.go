@@ -99,9 +99,13 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	var items []map[string]interface{}
 	
 	queryExec := h.DB.Prisma.QueryRaw(
-		"SELECT supplier_product_id FROM supplier_order_item WHERE supplier_order_id = ? LIMIT 1",
-		supplierOrder.ID,
-	)
+        `SELECT sp.supplier_product_id 
+         FROM supplier_product sp
+         JOIN supplier_order_item soi ON soi.supplier_product_id = sp.id
+         WHERE soi.supplier_order_id = ? 
+         LIMIT 1`,
+        supplierOrder.ID,
+    )
 
 	// FIX: Panggil Exec dengan 2 argumen (context dan pointer ke target slice)
 	// dan tangkap error-nya saja, karena Exec hanya mengembalikan 1 nilai (error).

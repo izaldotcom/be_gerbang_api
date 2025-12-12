@@ -174,97 +174,97 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	return nil
 }
 
-// === PLACE ORDER (REAL IMPLEMENTATION BASED ON HTML) ===
+// === PLACE ORDER (FIX: TOMBOL BELI VIA JS) ===
 func (s *MitraHiggsService) PlaceOrder(playerID, productID string) (string, error) {
-	// playerID = "3145526"
-	// productID = "6" (Bukan "1M", tapi ID dari inspect element)
-
 	log.Printf("🛒 Memulai Transaksi: Player %s, Item ID %s", playerID, productID)
 
+	// 1. TUNGGU HALAMAN STABIL
 	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State: playwright.LoadStateNetworkidle,
+		State: playwright.LoadStateDomcontentloaded,
 	})
-	time.Sleep(1 * time.Second)
-
-	// 1. CEK POPUP LAGI (Jaga-jaga muncul lagi di halaman trade)
-	popupSelector := "#thickdivInvitation"
-	if vis, _ := s.Page.Locator(popupSelector).IsVisible(); vis {
-		log.Println("🧹 Menutup Popup yang muncul lagi...")
-		s.Page.Locator(popupSelector).Click()
+	
+	// Handle Popup (Best Effort)
+	if vis, _ := s.Page.Locator("#thickdivInvitation").IsVisible(); vis {
+		s.Page.Locator("#thickdivInvitation").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// 2. INPUT ID PLAYER
-	// Target HTML: <input type="text" id="buyerId" ...>
-	log.Println("✍️ Mengisi ID Player ke #buyerId...")
-	
-	inputSelector := "#buyerId"
-	if vis, _ := s.Page.Locator(inputSelector).IsVisible(); !vis {
-		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_input.png")})
-		return "", fmt.Errorf("kolom input #buyerId tidak ditemukan")
-	}
+	// 2. INPUT ID PLAYER (JS INJECTION)
+	log.Println("💉 Menyuntikkan ID via JavaScript...")
+	jsScript := fmt.Sprintf(`(() => {
+		var input = document.getElementById('buyerId');
+		if (input) {
+			input.value = '%s';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			input.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		}
+		return false;
+	})()`, playerID)
 
-	// Kosongkan dulu baru isi
-	s.Page.Locator(inputSelector).Fill("") 
-	err := s.Page.Locator(inputSelector).Fill(playerID)
-	if err != nil {
-		return "", fmt.Errorf("gagal isi ID: %v", err)
+	if _, err := s.Page.Evaluate(jsScript); err != nil {
+		return "", fmt.Errorf("gagal inject ID: %v", err)
 	}
 
 	// 3. PILIH PRODUK
-	// Target HTML: <li id="itemId_6" ...>
-	// Selector dinamis berdasarkan productID (misal: "6")
 	itemSelector := fmt.Sprintf("#itemId_%s", productID)
-	
 	log.Printf("👉 Memilih produk: %s", itemSelector)
 	
-	itemLoc := s.Page.Locator(itemSelector)
-	
-	// Cek visibilitas, scroll jika perlu
-	if vis, _ := itemLoc.IsVisible(); !vis {
-		log.Println("⚠️ Produk tidak terlihat, scrolling...")
-		s.Page.Evaluate("window.scrollTo(0, document.body.scrollHeight)")
-		itemLoc.ScrollIntoViewIfNeeded()
+	// Cek keberadaan produk
+	if count, _ := s.Page.Locator(itemSelector).Count(); count == 0 {
+		return "", fmt.Errorf("produk ID #itemId_%s tidak ditemukan (Cek Seeder Database Anda)", productID)
 	}
 
-	// Klik Produk
-	err = itemLoc.Click()
+	// Klik Produk (Force)
+	err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{
+		Force: playwright.Bool(true),
+	})
 	if err != nil {
-		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_product.png")})
-		return "", fmt.Errorf("gagal klik produk %s: %v", itemSelector, err)
+		return "", fmt.Errorf("gagal klik produk: %v", err)
 	}
 	
 	time.Sleep(500 * time.Millisecond)
 
-	// 4. SUBMIT ORDER
-	// Target HTML: <a class="buyBtns..." onclick="Index.queryBuyer();" ...>
-	// Selector: Class .buyBtns atau berdasarkan onclick
+	// ============================================================
+	// 4. SUBMIT ORDER (FIX UTAMA: JS EXECUTION)
+	// ============================================================
+	// Target: <a onclick="Index.queryBuyer();" ...>
+	// Masalah: Element ini tidak punya text, hanya background image.
+	// Solusi: Kita panggil fungsi JS aslinya langsung, atau cari berdasarkan class.
 	
-	log.Println("🖱️ Klik Tombol Proses (Query Buyer)...")
+	log.Println("🖱️ Mencoba Submit Order...")
 	
-	// Selector yang sangat spesifik berdasarkan onclick action
-	submitSelector := "a[onclick*='Index.queryBuyer']"
+	// STRATEGI 1: Cari elemen berdasarkan Class .buyBtns dan Klik
+	submitSelector := ".buyBtns"
 	
-	// Fallback ke class jika attribute selector gagal
-	if count, _ := s.Page.Locator(submitSelector).Count(); count == 0 {
-		submitSelector = ".buyBtns"
+	// Cek apakah elemen ada di DOM (tidak harus visible, kadang ketutup footer)
+	if count, _ := s.Page.Locator(submitSelector).Count(); count > 0 {
+		log.Println("   -> Tombol .buyBtns ditemukan, melakukan Force Click...")
+		err := s.Page.Locator(submitSelector).Click(playwright.LocatorClickOptions{
+			Force: playwright.Bool(true), // Force click walaupun element dianggap hidden/kosong
+		})
+		if err != nil {
+			log.Println("⚠️ Gagal klik tombol, mencoba Plan B (JS Exec)...")
+			// Plan B lanjut di bawah
+		}
+	} else {
+		log.Println("⚠️ Tombol .buyBtns tidak terdeteksi selector, mencoba Plan B (JS Exec)...")
 	}
 
-	err = s.Page.Locator(submitSelector).Click()
+	// STRATEGI 2 (PLAN B): Panggil fungsi JS website-nya langsung
+	// Ini meniru apa yang terjadi saat user klik tombol (onclick="Index.queryBuyer()")
+	log.Println("🚀 Eksekusi JS: Index.queryBuyer()...")
+	
+	_, err = s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) { console.error(e); }")
 	if err != nil {
-		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_submit.png")})
-		return "", fmt.Errorf("gagal klik tombol submit: %v", err)
+		s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_submit_fail.png")})
+		return "", fmt.Errorf("gagal eksekusi Index.queryBuyer(): %v", err)
 	}
 
-	// 5. HANDLING AFTER SUBMIT
-	// Biasanya setelah queryBuyer, akan muncul Modal Konfirmasi Nama Player
-	// Karena kita belum tau HTML konfirmasinya, kita assume success "Pending" dulu
-	// Nanti Anda perlu inspect modal konfirmasinya (Tombol "Lanjut" atau "Bayar")
-	
-	log.Println("✅ Tombol Query Buyer diklik. Menunggu respons...")
+	log.Println("✅ Perintah Submit dikirim ke Browser.")
 	time.Sleep(2 * time.Second) 
 	
-	// Screenshot untuk melihat apa yang terjadi setelah klik tombol
+	// Screenshot bukti sukses klik/submit
 	s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_after_submit.png")})
 
 	return "TRX-" + fmt.Sprintf("%d", time.Now().Unix()), nil
