@@ -165,6 +165,7 @@ model Product {
   name         String
   denom        Int
   price        Int
+  qty          Int
   status       Boolean  @default(true)
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt

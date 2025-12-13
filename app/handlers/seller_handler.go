@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"os"
 
@@ -29,7 +30,8 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 		"message": "List produk internal",
 		"data": []echo.Map{
 			{"product_code": "1M", "price": 1000, "status": "active"},
-			{"product_code": "100M", "price": 6000, "status": "active"},
+			{"product_code": "5M", "price": 7500, "status": "active"},
+			{"product_code": "100M", "price": 140000, "status": "active"},
 		},
 	})
 }
@@ -54,9 +56,9 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	// 1) INSERT internal_order
 	// ======================================================
-
 	internalOrderID := uuid.New().String()
 
+	// Kita insert default 1 dulu, nanti quantity loop diambil dari tabel product
 	_, err := h.DB.Prisma.ExecuteRaw(
 		`INSERT INTO internal_order 
 			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
@@ -65,9 +67,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	).Exec(c.Request().Context())
 
 	if err != nil {
-		return c.JSON(500, echo.Map{
-			"error": "Failed inserting internal_order: " + err.Error(),
-		})
+		return c.JSON(500, echo.Map{"error": "Failed inserting internal_order: " + err.Error()})
 	}
 
 	// ======================================================
@@ -92,51 +92,57 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	// ======================================================
-	// 4) GET supplier_order_item & Quantity
+	// 4) GET QUANTITY DARI TABEL PRODUCT (SESUAI REQUEST)
 	// ======================================================
-	// FIX: Update Query untuk mengambil 'quantity' juga
 	
-	var items []map[string]interface{}
+	// A. Ambil Resep Loop (Qty) dari Internal Product
+	var internalProduct []map[string]interface{}
+	
+	// Query langsung ke tabel product berdasarkan req.ProductID (Misal "5M")
+	errProduct := h.DB.Prisma.QueryRaw(
+		"SELECT qty FROM product WHERE id = ? LIMIT 1", 
+		req.ProductID,
+	).Exec(c.Request().Context(), &internalProduct)
 
+	if errProduct != nil || len(internalProduct) == 0 {
+		return c.JSON(500, echo.Map{"error": "Product definition not found in DB"})
+	}
+
+	// Convert Qty DB ke Integer
+	finalLoopCount := 1
+	if qtyFloat, ok := internalProduct[0]["qty"].(float64); ok {
+		finalLoopCount = int(qtyFloat)
+	} else if qtyInt, ok := internalProduct[0]["qty"].(int64); ok {
+		finalLoopCount = int(qtyInt)
+	}
+
+	log.Printf("🔥 PRODUCT ID: %s | QTY (LOOP): %d", req.ProductID, finalLoopCount)
+
+
+	// B. Ambil ID Tombol HTML (NominalID) dari Supplier Product
+	var items []map[string]interface{}
 	queryExec := h.DB.Prisma.QueryRaw(
-		`SELECT sp.supplier_product_id, soi.quantity 
+		`SELECT sp.supplier_product_id 
 		 FROM supplier_product sp
 		 JOIN supplier_order_item soi ON soi.supplier_product_id = sp.id
 		 WHERE soi.supplier_order_id = ? 
 		 LIMIT 1`,
 		supplierOrder.ID,
 	)
-
-	queryErr := queryExec.Exec(c.Request().Context(), &items)
-
-	if queryErr != nil {
-		return c.JSON(500, echo.Map{"error": "Query supplier_order_item failed: " + queryErr.Error()})
-	}
-
-	if len(items) == 0 {
-		return c.JSON(500, echo.Map{"error": "No supplier_order_item"})
+	if err := queryExec.Exec(c.Request().Context(), &items); err != nil || len(items) == 0 {
+		return c.JSON(500, echo.Map{"error": "No supplier_order_item found"})
 	}
 
 	nominalID := items[0]["supplier_product_id"].(string)
-	
-	// FIX: Ambil quantity dari hasil query (logic sama seperti worker)
-	var repeatCount int
-	if qtyFloat, ok := items[0]["quantity"].(float64); ok {
-		repeatCount = int(qtyFloat)
-	} else if qtyInt, ok := items[0]["quantity"].(int64); ok {
-		repeatCount = int(qtyInt)
-	} else {
-		repeatCount = 1
-	}
 
 	// ======================================================
-	// 5) Scraper PlaceOrder
+	// 5) Scraper PlaceOrder (GUNAKAN LOOP DARI TABEL PRODUCT)
 	// ======================================================
-	// FIX: Kirim repeatCount sebagai parameter ketiga
-	trxID, err := svc.PlaceOrder(req.Destination, nominalID, repeatCount)
+	
+	// Masukkan finalLoopCount ke fungsi PlaceOrder
+	trxID, err := svc.PlaceOrder(req.Destination, nominalID, finalLoopCount)
 	
 	if err != nil {
-		// supplier_order FAILED
 		h.DB.Prisma.ExecuteRaw(
 			"UPDATE supplier_order SET status='failed', last_error=? WHERE id=?",
 			err.Error(),
@@ -154,26 +160,16 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	// ======================================================
 	// 6) Mark SUCCESS
 	// ======================================================
-	h.DB.Prisma.ExecuteRaw(
-		"UPDATE supplier_order SET status='success' WHERE id=?",
-		supplierOrder.ID,
-	).Exec(c.Request().Context())
+	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(c.Request().Context())
+	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(c.Request().Context())
 
-	h.DB.Prisma.ExecuteRaw(
-		"UPDATE internal_order SET status='success' WHERE id=?",
-		internalOrderID,
-	).Exec(c.Request().Context())
-
-	// ======================================================
-	// 7) Response
-	// ======================================================
 	return c.JSON(200, echo.Map{
 		"message":         "Order Success",
 		"internal_order":  internalOrderID,
 		"supplier_order":  supplierOrder.ID,
 		"provider_trx_id": trxID,
 		"destination":     req.Destination,
-		"quantity_loop":   repeatCount,
+		"quantity_loop":   finalLoopCount, // Mengembalikan jumlah loop yang terbaca
 		"status":          "success",
 	})
 }

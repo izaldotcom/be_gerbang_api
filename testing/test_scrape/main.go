@@ -26,10 +26,9 @@ func main() {
 		log.Fatal("Login Gagal:", err)
 	}
 
-	// 3. Coba Order Dummy (Hati-hati saldo kepotong kalau sukses)
-	// trxID, err := svc.PlaceOrder("12345678", "1M")
-	// if err != nil {
-	// 	log.Fatal("Order Gagal:", err)
-	// }
-	// log.Println("Order ID:", trxID)
+	trxID, err := svc.PlaceOrder("12345678", "1M", 1)
+	if err != nil {
+		log.Fatal("Order Gagal:", err)
+	}
+	log.Println("Order ID:", trxID)
 }

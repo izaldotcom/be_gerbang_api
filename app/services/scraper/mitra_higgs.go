@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"gerbangapi/prisma/db"
@@ -174,145 +175,188 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	return nil
 }
 
-// === PLACE ORDER (FIX FINAL: JS EXECUTION & RESULT CHECK) ===
+// === PLACE ORDER (FIX: USER'S CLICK METHOD + CORRECT LOOPING) ===
 func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int) (string, error) {
 	log.Printf("🛒 Memulai %d Transaksi untuk Player %s (Item %s)", quantity, playerID, productID)
 
+	// 1. Persiapan Awal
 	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{State: playwright.LoadStateDomcontentloaded})
 	
-	// 1. Handle Popup Iklan
-	if vis, _ := s.Page.Locator("#thickdivInvitation").IsVisible(); vis {
-		s.Page.Locator("#thickdivInvitation").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// 2. Inject ID
-	jsInjectID := fmt.Sprintf(`(() => {
-		var input = document.getElementById('buyerId');
-		if (input) {
-			input.value = '%s';
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-			return true;
+	// Handle Popup Iklan Awal (Persis kode Anda)
+	if count, _ := s.Page.Locator("#thickdivInvitation").Count(); count > 0 {
+		s.Page.Evaluate("try { hideInvitation(); } catch(e) {}")
+		if vis, _ := s.Page.Locator("#thickdivInvitation").IsVisible(); vis {
+			s.Page.Locator("#thickdivInvitation").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		}
-		return false;
-	})()`, playerID)
-	
-	if _, err := s.Page.Evaluate(jsInjectID); err != nil {
-		return "", fmt.Errorf("gagal inject ID: %v", err)
-	}
-
-	// 3. Pilih Produk
-	itemSelector := fmt.Sprintf("#itemId_%s", productID)
-	if err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)}); err != nil {
-		return "", fmt.Errorf("produk ID %s tidak ditemukan", productID)
+		s.Page.Locator("#thickdivInvitation").WaitFor(playwright.LocatorWaitForOptions{
+			State: playwright.WaitForSelectorStateHidden, 
+			Timeout: playwright.Float(3000),
+		})
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	var successTrx []string
 	
+	// ============================================================
+	// MULAI LOOPING TRANSAKSI (Quantity 1 s/d X)
+	// ============================================================
 	for i := 1; i <= quantity; i++ {
-		log.Printf("🔄 Proses Transaksi ke-%d dari %d...", i, quantity)
+		log.Printf("🔄 [LOOP %d/%d] Memulai Siklus...", i, quantity)
 
-		// A. REQUEST VALIDASI USER (Index.queryBuyer)
-		// Kita eksekusi JS langsung agar pasti terpanggil
-		_, err := s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) {}")
-		if err != nil {
-			log.Println("⚠️ Warning: queryBuyer JS error, mencoba klik manual...")
-			s.Page.Locator(".buyBtns").Click()
+		// A. BERSIHKAN POPUP SISA TRANSAKSI SEBELUMNYA
+		// Kita tutup popup hasil transaksi sebelumnya agar produk bisa diklik lagi
+		s.Page.Evaluate("try { Common.close(); } catch(e) {}") 
+		time.Sleep(800 * time.Millisecond)
+
+		// ============================================================
+		// LANGKAH 2: PILIH PRODUK (METODE KLIK DARI KODE ANDA)
+		// ============================================================
+		itemSelector := fmt.Sprintf("#itemId_%s", productID)
+		
+		// 1. Pastikan elemen produk ada
+		if count, _ := s.Page.Locator(itemSelector).Count(); count == 0 {
+			return "", fmt.Errorf("produk dengan selector %s tidak ditemukan", itemSelector)
 		}
 
-		// B. TUNGGU HASIL VALIDASI (NAMA MUNCUL)
-		log.Println("⏳ Menunggu nama user muncul...")
-		userIsValid := false
-		
-		for attempt := 0; attempt < 10; attempt++ { // Max 5 detik
-			time.Sleep(500 * time.Millisecond)
+		// 2. CEK STOK
+		stockSelector := fmt.Sprintf("%s .itemPriceLabel", itemSelector)
+		if txt, _ := s.Page.Locator(stockSelector).InnerText(); strings.TrimSpace(txt) == "0" {
+			return "", fmt.Errorf("stok habis saat loop ke-%d", i)
+		}
 
-			// Cek Error (User tidak ada)
+		// 3. KLIK PRODUK (MENGGUNAKAN METODE FORCE CLICK ANDA)
+		log.Println("   -> Klik Produk...")
+		err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{
+			Force: playwright.Bool(true),
+		})
+		if err != nil {
+			return "", fmt.Errorf("gagal klik produk di loop ke-%d: %v", i, err)
+		}
+
+		// Jeda agar seleksi produk teregistrasi
+		time.Sleep(800 * time.Millisecond)
+
+		// ============================================================
+		// LANGKAH 3: INPUT ID PLAYER
+		// ============================================================
+		inputSelector := "#buyerId"
+		
+		// Cek dulu apakah ID sudah terisi (biar lebih cepat)
+		currentVal, _ := s.Page.Locator(inputSelector).InputValue()
+		
+		if currentVal != playerID {
+			log.Println("   -> Mengisi ID Player...")
+			
+			// Pastikan input visible
+			s.Page.WaitForSelector(inputSelector, playwright.PageWaitForSelectorOptions{
+				State: playwright.WaitForSelectorStateVisible,
+			})
+
+			s.Page.Locator(inputSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
+			s.Page.Locator(inputSelector).Fill("") 
+			
+			err = s.Page.Locator(inputSelector).Type(playerID, playwright.LocatorTypeOptions{
+				Delay: playwright.Float(100), 
+			})
+			if err != nil {
+				return "", fmt.Errorf("gagal mengetik ID: %v", err)
+			}
+		} else {
+			log.Println("   -> ID Player sudah terisi.")
+		}
+
+		// ============================================================
+		// LANGKAH 4: PROSES TRANSAKSI (Query & Confirm)
+		// ============================================================
+		
+		// Trigger Query
+		s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) {}")
+
+		// Tunggu Modal Konfirmasi Muncul
+		log.Println("   -> Menunggu modal...")
+		modalSelector := "#queryBuyerName" 
+		modalAppeared := false
+		
+		for tryCount := 0; tryCount < 10; tryCount++ { 
+			if vis, _ := s.Page.Locator(modalSelector).IsVisible(); vis {
+				if txt, _ := s.Page.Locator(modalSelector).InnerText(); txt != "" {
+					modalAppeared = true
+					break
+				}
+			}
+			// Cek Error (misal User Tidak Ada)
 			if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
 				txt, _ := s.Page.Locator("#publicTxt").InnerText()
-				if txt != "" && txt != "null" {
+				// Filter kata 'Berhasil' agar sisa popup sukses tidak dianggap error
+				if txt != "" && txt != "null" && !strings.Contains(txt, "Berhasil") { 
 					s.Page.Evaluate("Common.close()")
-					return "", fmt.Errorf("GAGAL SAAT CEK USER: %s", txt)
+					return "", fmt.Errorf("GAGAL SAAT CEK USER (Loop %d): %s", i, txt)
 				}
 			}
-
-			// Cek Nama Muncul (#queryBuyerName)
-			// Kita pastikan text-nya tidak kosong
-			name, _ := s.Page.Locator("#queryBuyerName").InnerText()
-			if name != "" {
-				userIsValid = true
-				log.Printf("✅ User Valid: %s", name)
-				break 
-			}
+			time.Sleep(500 * time.Millisecond)
 		}
 
-		if !userIsValid {
-			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_stuck_validation.png")})
-			return "", fmt.Errorf("timeout: nama player tidak muncul")
+		if !modalAppeared {
+			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_loop_modal_fail.png")})
+			return "", fmt.Errorf("timeout: modal konfirmasi tidak muncul di loop ke-%d", i)
 		}
 
-		// Jeda sedikit agar variabel internal web siap menerima perintah jual
-		time.Sleep(1 * time.Second)
+		// Jeda agar tombol konfirmasi siap
+		time.Sleep(1000 * time.Millisecond)
 
-		// C. EKSEKUSI BELI (Index.sellItem) - THE KILL SHOT
-		// Daripada klik tombol, kita tembak fungsinya langsung.
-		// Ini 100% akan memicu request ke server Mitra Higgs jika modal sudah terbuka.
-		
-		log.Println("🚀 EKSEKUSI TRANSAKSI (JS Inject)...")
-		
-		_, err = s.Page.Evaluate("try { Index.sellItem(); } catch(e) { console.error(e); }")
-		if err != nil {
-			return "", fmt.Errorf("gagal eksekusi Index.sellItem()")
-		}
-
-		// D. VERIFIKASI AKHIR (CEK POPUP HASIL)
-		// Kita harus menunggu popup hasil muncul untuk memastikan stok berkurang.
-		log.Println("🧐 Menunggu laporan hasil transaksi...")
-		
+		// KLIK KONFIRMASI (RETRY MECHANISM)
+		log.Println("   -> Klik Konfirmasi...")
+		confirmSelector := "a[onclick*='Index.sellItem']"
 		transactionConfirmed := false
 		
-		for attempt := 0; attempt < 10; attempt++ { // Max 5 detik tunggu respon
-			time.Sleep(500 * time.Millisecond)
-			
-			// Cek Popup #publicTip (Tempat pesan sukses/gagal muncul)
-			if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
-				resultText, _ := s.Page.Locator("#publicTxt").InnerText()
-				log.Printf("   -> Server Response: %s", resultText)
-				
-				// Screenshot bukti respon server
-				s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(fmt.Sprintf("debug_result_%d.png", i))})
-
-				if resultText == "Saldo tidak cukup" || resultText == "Gagal" {
-					return "", fmt.Errorf("TRANSAKSI DITOLAK SERVER: %s", resultText)
-				}
-				
-				// Jika popup muncul dan bukan error fatal, anggap sukses
-				transactionConfirmed = true
-				s.Page.Evaluate("Common.close()") // Tutup popup
-				break
+		for attempt := 1; attempt <= 3; attempt++ {
+			// Klik
+			if vis, _ := s.Page.Locator(confirmSelector).IsVisible(); vis {
+				s.Page.Locator(confirmSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 			}
+
+			// Tunggu Respon (3 detik per attempt)
+			for waitTick := 0; waitTick < 8; waitTick++ {
+				time.Sleep(500 * time.Millisecond)
+				
+				if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
+					resultText, _ := s.Page.Locator("#publicTxt").InnerText()
+					log.Printf("   -> Server Response (Loop %d): %s", i, resultText)
+					
+					if resultText == "Saldo tidak cukup" || resultText == "Gagal" || resultText == "Error" {
+						s.Page.Evaluate("Common.close()")
+						return "", fmt.Errorf("TRANSAKSI DITOLAK: %s", resultText)
+					}
+					
+					// Jika respon ada (sukses), tandai flag true
+					transactionConfirmed = true
+					// Kita tutup popup di AWAL loop berikutnya (Step A), jangan sekarang.
+					// Biarkan popup sukses terlihat sebentar.
+					break 
+				}
+			}
+			if transactionConfirmed { break }
+			log.Printf("   ⚠️ Retry klik konfirmasi ke-%d...", attempt)
 		}
 
-		// Jika tidak ada popup konfirmasi, kita anggap gagal/timeout agar aman (tidak memakan saldo api tapi barang ga masuk)
 		if !transactionConfirmed {
-			// Coba cek screenshot terakhir
-			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_no_response.png")})
-			
-			// OPSIONAL: Return Error jika ingin strict. 
-			// return "", fmt.Errorf("tidak ada respon sukses dari server (cek debug_no_response.png)")
-			
-			// ATAU: Log warning saja (kadang popup cepat hilang)
-			log.Println("⚠️ Warning: Tidak ada popup konfirmasi akhir, tapi perintah sudah dikirim.")
+			s.Page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String("debug_loop_no_resp.png")})
+			return "", fmt.Errorf("transaksi gagal di loop ke-%d: tombol diklik tapi tidak ada respon", i)
 		}
 
+		// Simpan Sukses
 		trxID := fmt.Sprintf("TRX-%d-%d", time.Now().Unix(), i)
 		successTrx = append(successTrx, trxID)
-		log.Printf("✅ Transaksi ke-%d Selesai.", i)
+		log.Printf("✅ Transaksi ke-%d Berhasil.", i)
 
-		// Jeda antar transaksi
-		time.Sleep(3 * time.Second) 
+		// Jeda sebelum loop berikutnya (PENTING untuk animasi)
+		time.Sleep(2000 * time.Millisecond) 
 	}
 
+	// ============================================================
+	// FINISH
+	// ============================================================
+	log.Println("🏁 Semua looping selesai.")
 	finalTrxString := fmt.Sprintf("%v", successTrx)
 	return finalTrxString, nil
 }
