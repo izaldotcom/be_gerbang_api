@@ -1,39 +1,49 @@
 package main
 
 import (
-	"gerbangapi/app/services/scraper"
-	"gerbangapi/prisma/db"
 	"log"
+	"os"
+	"time"
+
+	"gerbangapi/app/services/scraper" // Sesuaikan nama module Anda
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// 1. Load Env & Redis
-	godotenv.Load()
-	db.ConnectRedis()
+	// 1. Load Env (Arahkan ke file .env project)
+	if err := godotenv.Load("../../.env"); err != nil {
+		log.Println("⚠️ Warning: Tidak bisa load .env dari folder parent, mencoba default...")
+		godotenv.Load() 
+	}
 
-	// 2. Init Scraper
-	log.Println("🤖 Menjalankan Bot...")
-	svc, err := scraper.NewMitraHiggsService()
+	log.Println("🧪 TESTING: Memulai Browser (Visual Mode)...")
+
+	// 2. Init Service dengan Debug Mode = TRUE (Browser Muncul)
+	svc, err := scraper.NewMitraHiggsService(true)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer svc.Close()
+	// Jangan lupa Close, tapi mungkin kita mau lihat hasilnya dulu jadi bisa di-comment atau diberi delay
+	defer svc.Close() 
 
-	// 3. TEST LOGIN DENGAN AKUN ANDA
-	// ID: 946235
-	// Pass: Aldy2015
-	log.Println("🔑 Mencoba Login dengan ID: 946235...")
-	
-	err = svc.Login("946235", "Aldy2015")
-	
-	if err != nil {
-		log.Fatal("❌ Login Gagal:", err)
+	// 3. Tes Login
+	username := os.Getenv("MH_USERNAME")
+	password := os.Getenv("MH_PASSWORD")
+
+	if username == "" || password == "" {
+		log.Fatal("❌ MH_USERNAME atau MH_PASSWORD belum diset di .env")
 	}
 
-	log.Println("🎉 Login Berhasil! Bot akan tetap terbuka selama 10 detik agar Anda bisa lihat hasilnya.")
+	log.Printf("👤 Login sebagai: %s", username)
 	
-	// Tahan browser sebentar biar bisa dilihat (jangan langsung close)
-	svc.Page.WaitForTimeout(300000) 
+	err = svc.Login(username, password)
+	if err != nil {
+		log.Fatalf("❌ Login Gagal: %v", err)
+	}
+
+	log.Println("✅ Login Berhasil! Browser akan menutup dalam 10 detik...")
+	
+	// Tahan browser sebentar agar Anda bisa melihat hasilnya
+	time.Sleep(10 * time.Second)
 }

@@ -117,11 +117,12 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	// B. Init Scraper
-	svc, err := scraper.NewMitraHiggsService()
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
-	}
-	defer svc.Close()
+	svc, err := scraper.NewMitraHiggsService(false) 
+
+if err != nil {
+    return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
+}
+defer svc.Close()
 
 	if err := svc.Login(os.Getenv("MH_USERNAME"), os.Getenv("MH_PASSWORD")); err != nil {
 		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})

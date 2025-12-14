@@ -32,7 +32,7 @@ type SerializableCookie struct {
 	SameSite string  `json:"same_site"`
 }
 
-func NewMitraHiggsService() (*MitraHiggsService, error) {
+func NewMitraHiggsService(isDebug bool) (*MitraHiggsService, error) {
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func NewMitraHiggsService() (*MitraHiggsService, error) {
 	// OPTIMASI 1: HEADLESS TRUE & CHROMIUM ARGS
 	// Menggunakan headless agar tidak merender UI (lebih cepat & ringan CPU)
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(true), 
+		Headless: playwright.Bool(!isDebug), 
 		Args: []string{
 			"--no-sandbox",
 			"--disable-setuid-sandbox",
@@ -66,7 +66,6 @@ func NewMitraHiggsService() (*MitraHiggsService, error) {
 		return nil, err
 	}
 
-	// Viewport sedikit diperkecil untuk hemat resource render
 	if err := page.SetViewportSize(375, 812); err != nil {
 		return nil, err
 	}
