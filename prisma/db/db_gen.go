@@ -238,6 +238,7 @@ model Product {
   name       String
   denom      Int
   price      Int
+  qty        Int
   status     Boolean  @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -444,10 +445,6 @@ type PrismaClient struct {
 	SupplierOrderItem supplierOrderItemActions
 }
 
-func (p *PrismaClient) Tx(ctx context.Context, f func(tx *PrismaClient) error) error {
-	panic("unimplemented")
-}
-
 // --- template enums.gotpl ---
 
 type TransactionIsolationLevel string
@@ -582,6 +579,7 @@ const (
 	ProductScalarFieldEnumName      ProductScalarFieldEnum = "name"
 	ProductScalarFieldEnumDenom     ProductScalarFieldEnum = "denom"
 	ProductScalarFieldEnumPrice     ProductScalarFieldEnum = "price"
+	ProductScalarFieldEnumQty       ProductScalarFieldEnum = "qty"
 	ProductScalarFieldEnumStatus    ProductScalarFieldEnum = "status"
 	ProductScalarFieldEnumCreatedAt ProductScalarFieldEnum = "created_at"
 	ProductScalarFieldEnumUpdatedAt ProductScalarFieldEnum = "updated_at"
@@ -1028,6 +1026,8 @@ const productFieldName productPrismaFields = "name"
 const productFieldDenom productPrismaFields = "denom"
 
 const productFieldPrice productPrismaFields = "price"
+
+const productFieldQty productPrismaFields = "qty"
 
 const productFieldStatus productPrismaFields = "status"
 
@@ -2387,6 +2387,7 @@ type InnerProduct struct {
 	Name      string   `json:"name"`
 	Denom     int      `json:"denom"`
 	Price     int      `json:"price"`
+	Qty       int      `json:"qty"`
 	Status    bool     `json:"status"`
 	CreatedAt DateTime `json:"created_at"`
 	UpdatedAt DateTime `json:"updated_at"`
@@ -2398,6 +2399,7 @@ type RawProductModel struct {
 	Name      RawString   `json:"name"`
 	Denom     RawInt      `json:"denom"`
 	Price     RawInt      `json:"price"`
+	Qty       RawInt      `json:"qty"`
 	Status    RawBoolean  `json:"status"`
 	CreatedAt RawDateTime `json:"created_at"`
 	UpdatedAt RawDateTime `json:"updated_at"`
@@ -30133,6 +30135,11 @@ type productQuery struct {
 	// @required
 	Price productQueryPriceInt
 
+	// Qty
+	//
+	// @required
+	Qty productQueryQtyInt
+
 	// Status
 	//
 	// @required
@@ -31699,6 +31706,405 @@ func (r productQueryPriceInt) GTEIfPresent(value *int) productDefaultParam {
 
 func (r productQueryPriceInt) Field() productPrismaFields {
 	return productFieldPrice
+}
+
+// base struct
+type productQueryQtyInt struct{}
+
+// Set the required value of Qty
+func (r productQueryQtyInt) Set(value int) productWithPrismaQtySetParam {
+
+	return productWithPrismaQtySetParam{
+		data: builder.Field{
+			Name:  "qty",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Qty dynamically
+func (r productQueryQtyInt) SetIfPresent(value *Int) productWithPrismaQtySetParam {
+	if value == nil {
+		return productWithPrismaQtySetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of Qty
+func (r productQueryQtyInt) Increment(value int) productWithPrismaQtySetParam {
+	return productWithPrismaQtySetParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) IncrementIfPresent(value *int) productWithPrismaQtySetParam {
+	if value == nil {
+		return productWithPrismaQtySetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of Qty
+func (r productQueryQtyInt) Decrement(value int) productWithPrismaQtySetParam {
+	return productWithPrismaQtySetParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) DecrementIfPresent(value *int) productWithPrismaQtySetParam {
+	if value == nil {
+		return productWithPrismaQtySetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of Qty
+func (r productQueryQtyInt) Multiply(value int) productWithPrismaQtySetParam {
+	return productWithPrismaQtySetParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) MultiplyIfPresent(value *int) productWithPrismaQtySetParam {
+	if value == nil {
+		return productWithPrismaQtySetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of Qty
+func (r productQueryQtyInt) Divide(value int) productWithPrismaQtySetParam {
+	return productWithPrismaQtySetParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) DivideIfPresent(value *int) productWithPrismaQtySetParam {
+	if value == nil {
+		return productWithPrismaQtySetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r productQueryQtyInt) Equals(value int) productWithPrismaQtyEqualsParam {
+
+	return productWithPrismaQtyEqualsParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) EqualsIfPresent(value *int) productWithPrismaQtyEqualsParam {
+	if value == nil {
+		return productWithPrismaQtyEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r productQueryQtyInt) Order(direction SortOrder) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name:  "qty",
+			Value: direction,
+		},
+	}
+}
+
+func (r productQueryQtyInt) Cursor(cursor int) productCursorParam {
+	return productCursorParam{
+		data: builder.Field{
+			Name:  "qty",
+			Value: cursor,
+		},
+	}
+}
+
+func (r productQueryQtyInt) In(value []int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) InIfPresent(value []int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r productQueryQtyInt) NotIn(value []int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) NotInIfPresent(value []int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r productQueryQtyInt) Lt(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) LtIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r productQueryQtyInt) Lte(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) LteIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r productQueryQtyInt) Gt(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) GtIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r productQueryQtyInt) Gte(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) GteIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r productQueryQtyInt) Not(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQueryQtyInt) NotIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r productQueryQtyInt) LT(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r productQueryQtyInt) LTIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r productQueryQtyInt) LTE(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r productQueryQtyInt) LTEIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r productQueryQtyInt) GT(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r productQueryQtyInt) GTIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r productQueryQtyInt) GTE(value int) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "qty",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r productQueryQtyInt) GTEIfPresent(value *int) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r productQueryQtyInt) Field() productPrismaFields {
+	return productFieldQty
 }
 
 // base struct
@@ -50618,16 +51024,6 @@ type supplierProductSetParam struct {
 	data builder.Field
 }
 
-// getQuery implements SupplierProductWithPrismaSupplierProductIDSetParam.
-func (p supplierProductSetParam) getQuery() builder.Query {
-	panic("unimplemented")
-}
-
-// supplierProductIDField implements SupplierProductWithPrismaSupplierProductIDSetParam.
-func (p supplierProductSetParam) supplierProductIDField() {
-	panic("unimplemented")
-}
-
 func (supplierProductSetParam) settable() {}
 
 func (p supplierProductSetParam) field() builder.Field {
@@ -50732,16 +51128,6 @@ type SupplierProductWithPrismaSupplierProductIDSetParam interface {
 type supplierProductWithPrismaSupplierProductIDSetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// denomField implements SupplierProductWithPrismaDenomSetParam.
-func (p supplierProductWithPrismaSupplierProductIDSetParam) denomField() {
-	panic("unimplemented")
-}
-
-// costPriceField implements SupplierProductWithPrismaCostPriceSetParam.
-func (p supplierProductWithPrismaSupplierProductIDSetParam) costPriceField() {
-	panic("unimplemented")
 }
 
 func (p supplierProductWithPrismaSupplierProductIDSetParam) field() builder.Field {
@@ -50978,11 +51364,6 @@ type supplierProductWithPrismaNameSetParam struct {
 	query builder.Query
 }
 
-// denomField implements SupplierProductWithPrismaDenomSetParam.
-func (p supplierProductWithPrismaNameSetParam) denomField() {
-	panic("unimplemented")
-}
-
 func (p supplierProductWithPrismaNameSetParam) field() builder.Field {
 	return p.data
 }
@@ -51061,16 +51442,6 @@ type supplierProductWithPrismaDenomSetParam struct {
 	query builder.Query
 }
 
-// costPriceField implements SupplierProductWithPrismaCostPriceSetParam.
-func (p supplierProductWithPrismaDenomSetParam) costPriceField() {
-	panic("unimplemented")
-}
-
-// nameField implements SupplierProductWithPrismaNameSetParam.
-func (p supplierProductWithPrismaDenomSetParam) nameField() {
-	panic("unimplemented")
-}
-
 func (p supplierProductWithPrismaDenomSetParam) field() builder.Field {
 	return p.data
 }
@@ -51147,16 +51518,6 @@ type SupplierProductWithPrismaCostPriceSetParam interface {
 type supplierProductWithPrismaCostPriceSetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// supplierField implements SupplierProductWithPrismaSupplierSetParam.
-func (p supplierProductWithPrismaCostPriceSetParam) supplierField() {
-	panic("unimplemented")
-}
-
-// supplierProductIDField implements SupplierProductWithPrismaSupplierProductIDSetParam.
-func (p supplierProductWithPrismaCostPriceSetParam) supplierProductIDField() {
-	panic("unimplemented")
 }
 
 func (p supplierProductWithPrismaCostPriceSetParam) field() builder.Field {
@@ -51695,6 +52056,7 @@ var productOutput = []builder.Output{
 	{Name: "name"},
 	{Name: "denom"},
 	{Name: "price"},
+	{Name: "qty"},
 	{Name: "status"},
 	{Name: "created_at"},
 	{Name: "updated_at"},
@@ -51856,16 +52218,6 @@ type productSetParam struct {
 	data builder.Field
 }
 
-// getQuery implements ProductWithPrismaNameSetParam.
-func (p productSetParam) getQuery() builder.Query {
-	panic("unimplemented")
-}
-
-// nameField implements ProductWithPrismaNameSetParam.
-func (p productSetParam) nameField() {
-	panic("unimplemented")
-}
-
 func (productSetParam) settable() {}
 
 func (p productSetParam) field() builder.Field {
@@ -51970,11 +52322,6 @@ type ProductWithPrismaNameSetParam interface {
 type productWithPrismaNameSetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// denomField implements ProductWithPrismaDenomSetParam.
-func (p productWithPrismaNameSetParam) denomField() {
-	panic("unimplemented")
 }
 
 func (p productWithPrismaNameSetParam) field() builder.Field {
@@ -52190,6 +52537,84 @@ func (p productWithPrismaPriceEqualsUniqueParam) priceField()   {}
 
 func (productWithPrismaPriceEqualsUniqueParam) unique() {}
 func (productWithPrismaPriceEqualsUniqueParam) equals() {}
+
+type ProductWithPrismaQtyEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	productModel()
+	qtyField()
+}
+
+type ProductWithPrismaQtySetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	qtyField()
+}
+
+type productWithPrismaQtySetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaQtySetParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaQtySetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaQtySetParam) productModel() {}
+
+func (p productWithPrismaQtySetParam) qtyField() {}
+
+type ProductWithPrismaQtyWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	qtyField()
+}
+
+type productWithPrismaQtyEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaQtyEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaQtyEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaQtyEqualsParam) productModel() {}
+
+func (p productWithPrismaQtyEqualsParam) qtyField() {}
+
+func (productWithPrismaQtySetParam) settable()  {}
+func (productWithPrismaQtyEqualsParam) equals() {}
+
+type productWithPrismaQtyEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaQtyEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaQtyEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaQtyEqualsUniqueParam) productModel() {}
+func (p productWithPrismaQtyEqualsUniqueParam) qtyField()     {}
+
+func (productWithPrismaQtyEqualsUniqueParam) unique() {}
+func (productWithPrismaQtyEqualsUniqueParam) equals() {}
 
 type ProductWithPrismaStatusEqualsSetParam interface {
 	field() builder.Field
@@ -54278,21 +54703,6 @@ type supplierOrderSetParam struct {
 	data builder.Field
 }
 
-// supplierField implements SupplierOrderWithPrismaSupplierSetParam.
-func (p supplierOrderSetParam) supplierField() {
-	panic("unimplemented")
-}
-
-// getQuery implements SupplierOrderWithPrismaInternalOrderSetParam.
-func (p supplierOrderSetParam) getQuery() builder.Query {
-	panic("unimplemented")
-}
-
-// internalOrderField implements SupplierOrderWithPrismaInternalOrderSetParam.
-func (p supplierOrderSetParam) internalOrderField() {
-	panic("unimplemented")
-}
-
 func (supplierOrderSetParam) settable() {}
 
 func (p supplierOrderSetParam) field() builder.Field {
@@ -55329,21 +55739,6 @@ type supplierOrderItemSetParam struct {
 	data builder.Field
 }
 
-// supplierOrderField implements SupplierOrderItemWithPrismaSupplierOrderSetParam.
-func (p supplierOrderItemSetParam) supplierOrderField() {
-	panic("unimplemented")
-}
-
-// getQuery implements SupplierOrderItemWithPrismaQuantitySetParam.
-func (p supplierOrderItemSetParam) getQuery() builder.Query {
-	panic("unimplemented")
-}
-
-// quantityField implements SupplierOrderItemWithPrismaQuantitySetParam.
-func (p supplierOrderItemSetParam) quantityField() {
-	panic("unimplemented")
-}
-
 func (supplierOrderItemSetParam) settable() {}
 
 func (p supplierOrderItemSetParam) field() builder.Field {
@@ -55604,11 +55999,6 @@ type SupplierOrderItemWithPrismaQuantitySetParam interface {
 type supplierOrderItemWithPrismaQuantitySetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// supplierProductField implements SupplierOrderItemWithPrismaSupplierProductSetParam.
-func (p supplierOrderItemWithPrismaQuantitySetParam) supplierProductField() {
-	panic("unimplemented")
 }
 
 func (p supplierOrderItemWithPrismaQuantitySetParam) field() builder.Field {
@@ -56634,6 +57024,7 @@ func (r productActions) CreateOne(
 	_name ProductWithPrismaNameSetParam,
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
+	_qty ProductWithPrismaQtySetParam,
 
 	optional ...ProductSetParam,
 ) productCreateOne {
@@ -56651,6 +57042,7 @@ func (r productActions) CreateOne(
 	fields = append(fields, _name.field())
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
+	fields = append(fields, _qty.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())
@@ -83637,6 +84029,7 @@ func (r productUpsertOne) Create(
 	_name ProductWithPrismaNameSetParam,
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
+	_qty ProductWithPrismaQtySetParam,
 
 	optional ...ProductSetParam,
 ) productUpsertOne {
@@ -83647,6 +84040,7 @@ func (r productUpsertOne) Create(
 	fields = append(fields, _name.field())
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
+	fields = append(fields, _qty.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())
@@ -83700,6 +84094,7 @@ func (r productUpsertOne) CreateOrUpdate(
 	_name ProductWithPrismaNameSetParam,
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
+	_qty ProductWithPrismaQtySetParam,
 
 	optional ...ProductSetParam,
 ) productUpsertOne {
@@ -83710,6 +84105,7 @@ func (r productUpsertOne) CreateOrUpdate(
 	fields = append(fields, _name.field())
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
+	fields = append(fields, _qty.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())

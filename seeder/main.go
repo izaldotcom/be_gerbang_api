@@ -27,185 +27,168 @@ func main() {
 	defer client.Prisma.Disconnect()
 
 	ctx := context.Background()
-	log.Println("🚀 Memulai Seeding Lengkap...")
+
+	// ==========================================
+	// 🧹 STEP 0: CLEAN UP DATA (URUTAN PENTING!)
+	// ==========================================
+	log.Println("🧹 Membersihkan data lama...")
+	
+	// Hapus dari tabel Child (yang punya Foreign Key) dulu
+	client.SupplierOrderItem.FindMany().Delete().Exec(ctx)
+	client.SupplierOrder.FindMany().Delete().Exec(ctx)
+	client.InternalOrder.FindMany().Delete().Exec(ctx)
+	client.ProductRecipe.FindMany().Delete().Exec(ctx)
+	client.SupplierProduct.FindMany().Delete().Exec(ctx)
+	client.Product.FindMany().Delete().Exec(ctx)
+	client.Supplier.FindMany().Delete().Exec(ctx)
+	client.APIKey.FindMany().Delete().Exec(ctx)
+	client.RefreshToken.FindMany().Delete().Exec(ctx)
+	client.User.FindMany().Delete().Exec(ctx)
+	client.Role.FindMany().Delete().Exec(ctx)
+	
+	log.Println("✨ Database bersih!")
+	log.Println("🚀 Memulai Seeding Baru...")
 
 	// ==========================================
 	// 1. SEED ROLES
 	// ==========================================
 	roleNames := []string{"Admin", "Customer", "Operator"}
 	for _, name := range roleNames {
-		existingRole, err := client.Role.FindFirst(db.Role.Name.Equals(name)).Exec(ctx)
-		if err != nil || existingRole == nil {
-			client.Role.CreateOne(
-				db.Role.Name.Set(name),
-				db.Role.Description.Set(fmt.Sprintf("Role for %s", name)),
-			).Exec(ctx)
-			log.Printf("✅ Role Created: %s", name)
-		}
+		client.Role.CreateOne(
+			db.Role.Name.Set(name),
+			db.Role.Description.Set(fmt.Sprintf("Role for %s", name)),
+		).Exec(ctx)
+		log.Printf("✅ Role Created: %s", name)
 	}
 
 	// ==========================================
 	// 2. SEED USER ADMIN
 	// ==========================================
-	adminRole, err := client.Role.FindFirst(db.Role.Name.Equals("Admin")).Exec(ctx)
-	if err == nil && adminRole != nil {
-		adminEmail := "admin@gerbangapi.com"
-		existingUser, _ := client.User.FindUnique(db.User.Email.Equals(adminEmail)).Exec(ctx)
+	adminRole, _ := client.Role.FindFirst(db.Role.Name.Equals("Admin")).Exec(ctx)
+	adminEmail := "admin@gerbangapi.com"
+	
+	hashedPwd, _ := utils.HashPassword("password123")
+	newUser, err := client.User.CreateOne(
+		db.User.Name.Set("Super Administrator"),
+		db.User.Email.Set(adminEmail),
+		db.User.Password.Set(hashedPwd),
+		db.User.Role.Link(db.Role.ID.Equals(adminRole.ID)),
+		db.User.Status.Set("active"),
+	).Exec(ctx)
 
-		if existingUser == nil {
-			hashedPwd, _ := utils.HashPassword("password123")
-			newUser, err := client.User.CreateOne(
-				db.User.Name.Set("Super Administrator"),
-				db.User.Email.Set(adminEmail),
-				db.User.Password.Set(hashedPwd),
-				db.User.Role.Link(db.Role.ID.Equals(adminRole.ID)),
-				db.User.Status.Set("active"),
-			).Exec(ctx)
-
-			if err == nil {
-				log.Printf("✅ ADMIN DIBUAT: %s (ID: %s)", adminEmail, newUser.ID)
-				
-				// 3. API KEY
-				apiKeyVal := "MTR-TEST-KEY"
-				existingKey, _ := client.APIKey.FindUnique(db.APIKey.APIKey.Equals(apiKeyVal)).Exec(ctx)
-				if existingKey == nil {
-					client.APIKey.CreateOne(
-						db.APIKey.User.Link(db.User.ID.Equals(newUser.ID)),
-						db.APIKey.APIKey.Set(apiKeyVal),
-						db.APIKey.Secret.Set("RAHASIA-SANGAT-AMAN"),
-						db.APIKey.SellerName.Set("Mitra Admin Seeder"),
-					).Exec(ctx)
-					log.Println("✅ API KEY CREATED")
-				}
-			}
-		} else {
-			log.Println("ℹ️ Admin User sudah ada.")
-		}
+	if err == nil {
+		log.Printf("✅ ADMIN DIBUAT: %s (UUID: %s)", adminEmail, newUser.ID)
+		
+		// 3. API KEY
+		client.APIKey.CreateOne(
+			db.APIKey.User.Link(db.User.ID.Equals(newUser.ID)),
+			db.APIKey.APIKey.Set("MTR-TEST-KEY"),
+			db.APIKey.Secret.Set("RAHASIA-SANGAT-AMAN"),
+			db.APIKey.SellerName.Set("Mitra Admin Seeder"),
+		).Exec(ctx)
+		log.Println("✅ API KEY CREATED")
 	}
 
 	// ==========================================
-	// 4. SEED INTERNAL PRODUCT
+	// 4. SEED SUPPLIER
 	// ==========================================
-	// URUTAN: Name -> Denom -> Price
-	prodID := "1M"
-	existingProd, _ := client.Product.FindUnique(db.Product.ID.Equals(prodID)).Exec(ctx)
+	suppCode := "MH_OFFICIAL"
+	newSupp, err := client.Supplier.CreateOne(
+		db.Supplier.Name.Set("Mitra Higgs Official"),
+		db.Supplier.Type.Set("official"), 
+		db.Supplier.Code.Set(suppCode), 
+	).Exec(ctx)
+	
+	if err != nil {
+		log.Fatal("❌ Gagal buat supplier: ", err)
+	}
+	supplierID := newSupp.ID
+	log.Printf("✅ Supplier Created (UUID: %s)", supplierID)
 
-	if existingProd == nil {
-		_, err := client.Product.CreateOne(
-			// Field WAJIB (Urutan sesuai Prisma Generator)
-			db.Product.Name.Set("Koin Emas 1M"),
-			db.Product.Denom.Set(1000000), 
-			db.Product.Price.Set(1500),
-			
-			// Field Opsional/ID/Default di bawah
-			db.Product.ID.Set(prodID),
+	// ======================================================
+	// 5. SUPPLIER PRODUCTS (Modal Dasar)
+	// ======================================================
+	
+	var base1MID, base60MID string
+
+	// --- BASE 1: Koin 1M (ID HTML '6') ---
+	newSp1, _ := client.SupplierProduct.CreateOne(
+		// WAJIB (Scalar)
+		db.SupplierProduct.SupplierProductID.Set("6"), 
+		db.SupplierProduct.Name.Set("Base Koin 1M"),
+		db.SupplierProduct.Denom.Set(1000000),
+		db.SupplierProduct.CostPrice.Set(1000),
+		
+		// WAJIB (Relasi)
+		db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(supplierID)),
+
+		// OPSIONAL (Scalar)
+		db.SupplierProduct.Price.Set(1000),
+	).Exec(ctx)
+	base1MID = newSp1.ID
+	log.Printf("✅ Supplier Prod 1M Created (UUID: %s)", base1MID)
+
+	// --- BASE 2: Koin 60M (ID HTML '1') ---
+	newSp60, _ := client.SupplierProduct.CreateOne(
+		// WAJIB (Scalar)
+		db.SupplierProduct.SupplierProductID.Set("1"), 
+		db.SupplierProduct.Name.Set("Base Koin 60M"),
+		db.SupplierProduct.Denom.Set(60000000),
+		db.SupplierProduct.CostPrice.Set(60000),
+		
+		// WAJIB (Relasi)
+		db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(supplierID)),
+
+		// OPSIONAL (Scalar)
+		db.SupplierProduct.Price.Set(60000),
+	).Exec(ctx)
+	base60MID = newSp60.ID
+	log.Printf("✅ Supplier Prod 60M Created (UUID: %s)", base60MID)
+
+	// ======================================================
+	// 6. INTERNAL PRODUCTS & RECIPES
+	// ======================================================
+	
+	products := []struct {
+		Name     string
+		Price    int
+		Denom    int
+		BaseUUID string
+		Qty      int 
+	}{
+		{"Koin Emas 1M", 1500, 1000000, base1MID, 1},
+		{"Koin Emas 5M", 7500, 5000000, base1MID, 5}, // Loop 5x
+		{"Koin Emas 10M", 15000, 10000000, base1MID, 10}, 
+		{"Koin Emas 60M", 65000, 60000000, base60MID, 1}, 
+		{"Koin Emas 100M", 140000, 100000000, base1MID, 100},
+		{"Koin Emas 200M", 270000, 200000000, base1MID, 200},
+	}
+
+	for _, p := range products {
+		// 1. Buat Produk Internal
+		newProd, err := client.Product.CreateOne(
+			db.Product.Name.Set(p.Name),
+			db.Product.Denom.Set(p.Denom),
+			db.Product.Price.Set(p.Price),
+			db.Product.Qty.Set(p.Qty), 
 			db.Product.Status.Set(true),
 		).Exec(ctx)
 		
 		if err != nil {
-			log.Printf("❌ Gagal Product 1M: %v", err)
-		} else {
-			log.Println("✅ Product '1M' Created")
+			log.Printf("❌ Gagal create product %s: %v", p.Name, err)
+			continue
 		}
-	} else {
-		log.Println("ℹ️ Product '1M' sudah ada.")
-	}
+		
+		log.Printf("✅ Produk Internal Created: %s", p.Name)
 
-	// ==========================================
-	// 5. SEED SUPPLIER
-	// ==========================================
-	// FIX: Menambahkan field Type yang wajib
-	suppID := "mitra-higgs"
-	existingSupp, _ := client.Supplier.FindUnique(db.Supplier.ID.Equals(suppID)).Exec(ctx)
-
-	if existingSupp == nil {
-		client.Supplier.CreateOne(
-			// Field Wajib: Name -> Type
-			db.Supplier.Name.Set("Mitra Higgs Official"),
-			db.Supplier.Type.Set("official"), // <-- INI YANG MEMPERBAIKI ERROR ANDA
-			
-			// Baru ID (Opsional/Manual)
-			db.Supplier.ID.Set(suppID),
+		// 2. Buat Resep
+		client.ProductRecipe.CreateOne(
+			db.ProductRecipe.Quantity.Set(p.Qty), 
+			db.ProductRecipe.Product.Link(db.Product.ID.Equals(newProd.ID)),
+			db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(p.BaseUUID)),
 		).Exec(ctx)
-		log.Println("✅ Supplier Created")
-	}
-
-	// ======================================================
-	// 6. SUPPLIER PRODUCTS (Modal Dasar: 1M & 60M)
-	// ======================================================
-	
-	// BASE 1: Koin 1M (ID HTML = '6')
-	base1M := "MH_COIN_1M"
-	if _, err := client.SupplierProduct.FindUnique(db.SupplierProduct.ID.Equals(base1M)).Exec(ctx); err != nil {
-			client.SupplierProduct.CreateOne(
-					db.SupplierProduct.ID.Set(base1M),
-					db.SupplierProduct.Name.Set("Base Koin 1M"),
-					db.SupplierProduct.SupplierProductID.Set("6"), // ID HTML
-					db.SupplierProduct.Denom.Set(1000000),
-					db.SupplierProduct.CostPrice.Set(1000),
-					db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(suppID)),
-			).Exec(ctx)
-	}
-
-	// BASE 2: Koin 60M (ID HTML = '1')
-	base60M := "MH_COIN_60M"
-	if _, err := client.SupplierProduct.FindUnique(db.SupplierProduct.ID.Equals(base60M)).Exec(ctx); err != nil {
-			client.SupplierProduct.CreateOne(
-					db.SupplierProduct.ID.Set(base60M),
-					db.SupplierProduct.Name.Set("Base Koin 60M"),
-					db.SupplierProduct.SupplierProductID.Set("1"), // ID HTML
-					db.SupplierProduct.Denom.Set(60000000),
-					db.SupplierProduct.CostPrice.Set(60000),
-					db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(suppID)),
-			).Exec(ctx)
-	}
-
-	// ======================================================
-	// 7. INTERNAL PRODUCTS & RECIPES (Logika Perkalian)
-	// ======================================================
-	
-	products := []struct {
-			ID       string
-			Name     string
-			Price    int
-			Denom    int
-			BaseID   string // Bahan bakunya apa?
-			Qty      int    // Dikali berapa?
-	}{
-			{"1M", "Koin Emas 1M", 1500, 1000000, base1M, 1},
-			{"5M", "Koin Emas 5M", 7500, 5000000, base1M, 1},
-			{"10M", "Koin Emas 10M", 15000, 10000000, base1M, 10},     // 10 x 1M
-			{"60M", "Koin Emas 60M", 65000, 60000000, base60M, 1},     // 1 x 60M
-			{"100M", "Koin Emas 100M", 140000, 100000000, base1M, 100}, // 100 x 1M
-			{"200M", "Koin Emas 200M", 270000, 200000000, base1M, 200}, // 200 x 1M
-	}
-
-	for _, p := range products {
-			// 1. Buat Produk Internal
-			if _, err := client.Product.FindUnique(db.Product.ID.Equals(p.ID)).Exec(ctx); err != nil {
-					client.Product.CreateOne(
-							db.Product.ID.Set(p.ID),
-							db.Product.Name.Set(p.Name),
-							db.Product.Price.Set(p.Price),
-							db.Product.Denom.Set(p.Denom),
-							db.Product.Status.Set(true),
-					).Exec(ctx)
-					log.Printf("✅ Produk Internal Created: %s", p.Name)
-			}
-
-			// 2. Buat Resep (Perkalian)
-			existingRecipe, _ := client.ProductRecipe.FindFirst(
-					db.ProductRecipe.ProductID.Equals(p.ID),
-			).Exec(ctx)
-
-			if existingRecipe == nil {
-					client.ProductRecipe.CreateOne(
-							db.ProductRecipe.Quantity.Set(p.Qty), // KUNCI PERKALIAN DI SINI
-							db.ProductRecipe.Product.Link(db.Product.ID.Equals(p.ID)),
-							db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(p.BaseID)),
-					).Exec(ctx)
-					log.Printf("   -> Resep: %d x %s", p.Qty, p.BaseID)
-			}
+		
+		log.Printf("   -> Resep Created: %d x [SupplierUUID: %s]", p.Qty, p.BaseUUID)
 	}
 
 	log.Println("🏁 Seeding Selesai!")

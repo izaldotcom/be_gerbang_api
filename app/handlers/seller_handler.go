@@ -26,20 +26,20 @@ func NewSellerHandler(dbClient *db.PrismaClient, orderService *services.OrderSer
 }
 
 func (h *SellerHandler) SellerProducts(c echo.Context) error {
+	products, err := h.DB.Product.FindMany().Exec(c.Request().Context())
+	if err != nil {
+		return c.JSON(500, echo.Map{"error": err.Error()})
+	}
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "List produk internal",
-		"data": []echo.Map{
-			{"product_code": "1M", "price": 1000, "status": "active"},
-			{"product_code": "5M", "price": 7500, "status": "active"},
-			{"product_code": "100M", "price": 140000, "status": "active"},
-		},
+		"data":    products,
 	})
 }
 
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	type Req struct {
-		ProductID   string `json:"product_id"`
+		ProductID   string `json:"product_id"` // Harap kirim UUID disini
 		Destination string `json:"destination"`
 		RefID       string `json:"ref_id"`
 	}
@@ -50,37 +50,73 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	if req.ProductID == "" || req.Destination == "" {
-		return c.JSON(400, echo.Map{"error": "product_id & destination required"})
+		return c.JSON(400, echo.Map{"error": "product_id (UUID) & destination required"})
 	}
 
+	ctx := c.Request().Context()
+
 	// ======================================================
-	// 1) INSERT internal_order
+	// 1) VALIDASI PRODUCT ID (UUID)
+	// ======================================================
+	var product *db.ProductModel
+	var err error
+
+	// A. Cek apakah ini UUID valid?
+	// Jika payload benar (UUID), maka FindUnique akan sukses.
+	product, err = h.DB.Product.FindUnique(
+		db.Product.ID.Equals(req.ProductID),
+	).Exec(ctx)
+
+	// B. (Opsional) Fallback jika User masih bandel kirim "1M" atau Nama
+	if err != nil {
+		log.Printf("⚠️ Input '%s' bukan UUID valid, mencari berdasarkan Nama...", req.ProductID)
+		product, err = h.DB.Product.FindFirst(
+			db.Product.Name.Contains(req.ProductID), 
+		).Exec(ctx)
+
+		if err != nil {
+			return c.JSON(404, echo.Map{
+				"error": "Product tidak ditemukan. Pastikan mengirimkan UUID Product yang benar dari endpoint GET /seller/products",
+			})
+		}
+	}
+
+	realProductUUID := product.ID
+	finalLoopCount := product.Qty
+
+	log.Printf("✅ Order Diterima: %s (UUID: %s) | Qty Loop: %d", product.Name, realProductUUID, finalLoopCount)
+
+	// ======================================================
+	// 2) INSERT INTERNAL ORDER (Gunakan UUID Asli)
 	// ======================================================
 	internalOrderID := uuid.New().String()
 
-	// Kita insert default 1 dulu, nanti quantity loop diambil dari tabel product
-	_, err := h.DB.Prisma.ExecuteRaw(
+	// Disini kuncinya: kita masukkan realProductUUID, bukan string mentah dari user
+	_, err = h.DB.Prisma.ExecuteRaw(
 		`INSERT INTO internal_order 
 			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
 			VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())`,
-		internalOrderID, req.ProductID, req.Destination, 1,
-	).Exec(c.Request().Context())
+		internalOrderID, realProductUUID, req.Destination, 1,
+	).Exec(ctx)
 
 	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Failed inserting internal_order: " + err.Error()})
+		// Jika masih error disini, berarti ada masalah serius di DB constraint
+		return c.JSON(500, echo.Map{
+			"error": "Database error saat menyimpan order: " + err.Error(),
+		})
 	}
 
 	// ======================================================
-	// 2) MIXING (OrderService)
+	// 3) LOGIKA ORDER SERVICE & SCRAPER
 	// ======================================================
-	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(c.Request().Context(), internalOrderID)
+	
+	// A. Mixing
+	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID)
 	if mixErr != nil {
-		return c.JSON(500, echo.Map{"error": mixErr.Error()})
+		return c.JSON(500, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
 	}
 
-	// ======================================================
-	// 3) SCRAPER Login
-	// ======================================================
+	// B. Init Scraper
 	svc, err := scraper.NewMitraHiggsService()
 	if err != nil {
 		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
@@ -91,35 +127,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})
 	}
 
-	// ======================================================
-	// 4) GET QUANTITY DARI TABEL PRODUCT (SESUAI REQUEST)
-	// ======================================================
-	
-	// A. Ambil Resep Loop (Qty) dari Internal Product
-	var internalProduct []map[string]interface{}
-	
-	// Query langsung ke tabel product berdasarkan req.ProductID (Misal "5M")
-	errProduct := h.DB.Prisma.QueryRaw(
-		"SELECT qty FROM product WHERE id = ? LIMIT 1", 
-		req.ProductID,
-	).Exec(c.Request().Context(), &internalProduct)
-
-	if errProduct != nil || len(internalProduct) == 0 {
-		return c.JSON(500, echo.Map{"error": "Product definition not found in DB"})
-	}
-
-	// Convert Qty DB ke Integer
-	finalLoopCount := 1
-	if qtyFloat, ok := internalProduct[0]["qty"].(float64); ok {
-		finalLoopCount = int(qtyFloat)
-	} else if qtyInt, ok := internalProduct[0]["qty"].(int64); ok {
-		finalLoopCount = int(qtyInt)
-	}
-
-	log.Printf("🔥 PRODUCT ID: %s | QTY (LOOP): %d", req.ProductID, finalLoopCount)
-
-
-	// B. Ambil ID Tombol HTML (NominalID) dari Supplier Product
+	// C. Cari Item HTML ID (untuk tombol klik)
 	var items []map[string]interface{}
 	queryExec := h.DB.Prisma.QueryRaw(
 		`SELECT sp.supplier_product_id 
@@ -129,47 +137,28 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		 LIMIT 1`,
 		supplierOrder.ID,
 	)
-	if err := queryExec.Exec(c.Request().Context(), &items); err != nil || len(items) == 0 {
-		return c.JSON(500, echo.Map{"error": "No supplier_order_item found"})
+	if err := queryExec.Exec(ctx, &items); err != nil || len(items) == 0 {
+		return c.JSON(500, echo.Map{"error": "Mixing failed (No supplier items found)"})
 	}
-
 	nominalID := items[0]["supplier_product_id"].(string)
 
-	// ======================================================
-	// 5) Scraper PlaceOrder (GUNAKAN LOOP DARI TABEL PRODUCT)
-	// ======================================================
-	
-	// Masukkan finalLoopCount ke fungsi PlaceOrder
+	// D. Eksekusi Robot (Looping)
 	trxID, err := svc.PlaceOrder(req.Destination, nominalID, finalLoopCount)
-	
 	if err != nil {
-		h.DB.Prisma.ExecuteRaw(
-			"UPDATE supplier_order SET status='failed', last_error=? WHERE id=?",
-			err.Error(),
-			supplierOrder.ID,
-		).Exec(c.Request().Context())
-
-		h.DB.Prisma.ExecuteRaw(
-			"UPDATE internal_order SET status='failed' WHERE id=?",
-			internalOrderID,
-		).Exec(c.Request().Context())
-
+		h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", err.Error(), supplierOrder.ID).Exec(ctx)
+		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
 		return c.JSON(502, echo.Map{"error": "Provider failed: " + err.Error()})
 	}
 
-	// ======================================================
-	// 6) Mark SUCCESS
-	// ======================================================
-	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(c.Request().Context())
-	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(c.Request().Context())
+	// E. Sukses
+	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(ctx)
+	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(ctx)
 
 	return c.JSON(200, echo.Map{
-		"message":         "Order Success",
-		"internal_order":  internalOrderID,
-		"supplier_order":  supplierOrder.ID,
-		"provider_trx_id": trxID,
-		"destination":     req.Destination,
-		"quantity_loop":   finalLoopCount, // Mengembalikan jumlah loop yang terbaca
 		"status":          "success",
+		"message":         "Order Processed Successfully",
+		"product":         product.Name,
+		"trx_id":          trxID,
+		"quantity_loop":   finalLoopCount,
 	})
 }
