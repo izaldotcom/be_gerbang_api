@@ -180,7 +180,7 @@ func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierO
 	playerID := internalOrder.BuyerUID
 
 	// 3. Inisialisasi Scraper Service
-	svc, err := scraper.NewMitraHiggsService()
+	svc, err := scraper.NewMitraHiggsService(false)
 	if err != nil {
 		return fmt.Errorf("browser init failed: %v", err)
 	}

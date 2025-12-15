@@ -13,7 +13,7 @@ func main() {
 	db.ConnectRedis()
 
 	// 1. Init Scraper
-	svc, err := scraper.NewMitraHiggsService()
+	svc, err := scraper.NewMitraHiggsService(false)
 	if err != nil {
 		log.Fatal(err)
 	}

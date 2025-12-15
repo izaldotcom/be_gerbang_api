@@ -48,8 +48,12 @@ func (s *OrderService) BuildSupplierItems(ctx context.Context, productId string,
 	return items, nil
 }
 
-// 2) Create Supplier Order (FIXED URUTAN ARGUMEN)
-func (s *OrderService) CreateSupplierOrderFromInternal(ctx context.Context, internalOrder db.InternalOrderModel) (*db.SupplierOrderModel, error) {
+// 2) Create Supplier Order (UPDATED: Menerima targetSupplierID)
+func (s *OrderService) CreateSupplierOrderFromInternal(
+	ctx context.Context, 
+	internalOrder db.InternalOrderModel,
+	targetSupplierID string, // <-- PARAMETER BARU
+) (*db.SupplierOrderModel, error) {
 
 	// A. Hitung bahan
 	items, err := s.BuildSupplierItems(ctx, internalOrder.ProductID, internalOrder.Quantity)
@@ -60,35 +64,28 @@ func (s *OrderService) CreateSupplierOrderFromInternal(ctx context.Context, inte
 		return nil, errors.New("mixing generated 0 items")
 	}
 
-	// B. Cari Supplier
-	supplier, err := s.client.Supplier.FindFirst(
-		db.Supplier.Code.Equals("MH_OFFICIAL"),
+	// B. Validasi Supplier ID (Cek apakah ada di DB)
+	supplier, err := s.client.Supplier.FindUnique(
+		db.Supplier.ID.Equals(targetSupplierID),
 	).Exec(ctx)
 
-	if err != nil {
-		supplier, err = s.client.Supplier.FindFirst().Exec(ctx)
-		if err != nil {
-			return nil, errors.New("tidak ada supplier ditemukan")
-		}
+	if err != nil || supplier == nil {
+		return nil, errors.New("supplier_id tidak valid atau tidak ditemukan")
 	}
 
 	// C. Buat Header Supplier Order
-	// URUTAN PENTING: 
-	// 1. Link InternalOrder (Wajib)
-	// 2. Link Supplier (Wajib)
-	// 3. Status (Opsional karena ada default)
 	order, err := s.client.SupplierOrder.CreateOne(
 		// 1. Link ke InternalOrder
 		db.SupplierOrder.InternalOrder.Link(
 			db.InternalOrder.ID.Equals(internalOrder.ID),
 		),
 		
-		// 2. Link ke Supplier
+		// 2. Link ke Supplier (SESUAI PILIHAN USER)
 		db.SupplierOrder.Supplier.Link(
-			db.Supplier.ID.Equals(supplier.ID),
+			db.Supplier.ID.Equals(targetSupplierID),
 		),
 
-		// 3. Scalar Fields (Opsional ditaruh di akhir)
+		// 3. Scalar Fields
 		db.SupplierOrder.Status.Set("pending"),
 	).Exec(ctx)
 
@@ -99,7 +96,7 @@ func (s *OrderService) CreateSupplierOrderFromInternal(ctx context.Context, inte
 	// D. Buat Detail Item
 	for _, it := range items {
 		_, err := s.client.SupplierOrderItem.CreateOne(
-			// 1. Quantity (Scalar Wajib - biasanya urutan pertama di scalar)
+			// 1. Quantity (Scalar Wajib)
 			db.SupplierOrderItem.Quantity.Set(it.Quantity),
 
 			// 2. Link ke Header (SupplierOrder)
@@ -121,8 +118,13 @@ func (s *OrderService) CreateSupplierOrderFromInternal(ctx context.Context, inte
 	return order, nil
 }
 
-// 3) Public API
-func (s *OrderService) ProcessInternalOrder(ctx context.Context, internalOrderID string) (*db.SupplierOrderModel, error) {
+// 3) Public API (UPDATED)
+func (s *OrderService) ProcessInternalOrder(
+	ctx context.Context, 
+	internalOrderID string, 
+	supplierID string, // <-- PARAMETER BARU
+) (*db.SupplierOrderModel, error) {
+	
 	if ctx == nil {
 		return nil, errors.New("context cannot be nil")
 	}
@@ -139,5 +141,6 @@ func (s *OrderService) ProcessInternalOrder(ctx context.Context, internalOrderID
 		return nil, err
 	}
 
-	return s.CreateSupplierOrderFromInternal(ctx, *internalOrder)
+	// Oper supplierID ke fungsi creation
+	return s.CreateSupplierOrderFromInternal(ctx, *internalOrder, supplierID)
 }

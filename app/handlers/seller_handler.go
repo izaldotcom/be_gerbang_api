@@ -39,9 +39,10 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	type Req struct {
-		ProductID   string `json:"product_id"` // Harap kirim UUID disini
+		ProductID   string `json:"product_id"`
 		Destination string `json:"destination"`
 		RefID       string `json:"ref_id"`
+		SupplierID  string `json:"supplier_id"` // <-- FIELD BARU
 	}
 
 	req := new(Req)
@@ -49,8 +50,9 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(400, echo.Map{"error": "Invalid request"})
 	}
 
-	if req.ProductID == "" || req.Destination == "" {
-		return c.JSON(400, echo.Map{"error": "product_id (UUID) & destination required"})
+	// Validasi Input
+	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
+		return c.JSON(400, echo.Map{"error": "product_id, destination, dan supplier_id required"})
 	}
 
 	ctx := c.Request().Context()
@@ -61,13 +63,12 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	var product *db.ProductModel
 	var err error
 
-	// A. Cek apakah ini UUID valid?
-	// Jika payload benar (UUID), maka FindUnique akan sukses.
+	// A. Cek UUID valid
 	product, err = h.DB.Product.FindUnique(
 		db.Product.ID.Equals(req.ProductID),
 	).Exec(ctx)
 
-	// B. (Opsional) Fallback jika User masih bandel kirim "1M" atau Nama
+	// B. Fallback cari by Nama
 	if err != nil {
 		log.Printf("⚠️ Input '%s' bukan UUID valid, mencari berdasarkan Nama...", req.ProductID)
 		product, err = h.DB.Product.FindFirst(
@@ -75,23 +76,20 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		).Exec(ctx)
 
 		if err != nil {
-			return c.JSON(404, echo.Map{
-				"error": "Product tidak ditemukan. Pastikan mengirimkan UUID Product yang benar dari endpoint GET /seller/products",
-			})
+			return c.JSON(404, echo.Map{"error": "Product tidak ditemukan."})
 		}
 	}
 
 	realProductUUID := product.ID
 	finalLoopCount := product.Qty
 
-	log.Printf("✅ Order Diterima: %s (UUID: %s) | Qty Loop: %d", product.Name, realProductUUID, finalLoopCount)
+	log.Printf("✅ Order: %s | Supplier: %s | QtyLoop: %d", product.Name, req.SupplierID, finalLoopCount)
 
 	// ======================================================
-	// 2) INSERT INTERNAL ORDER (Gunakan UUID Asli)
+	// 2) INSERT INTERNAL ORDER
 	// ======================================================
 	internalOrderID := uuid.New().String()
 
-	// Disini kuncinya: kita masukkan realProductUUID, bukan string mentah dari user
 	_, err = h.DB.Prisma.ExecuteRaw(
 		`INSERT INTO internal_order 
 			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
@@ -100,35 +98,38 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	).Exec(ctx)
 
 	if err != nil {
-		// Jika masih error disini, berarti ada masalah serius di DB constraint
-		return c.JSON(500, echo.Map{
-			"error": "Database error saat menyimpan order: " + err.Error(),
-		})
+		return c.JSON(500, echo.Map{"error": "Database error: " + err.Error()})
 	}
 
 	// ======================================================
-	// 3) LOGIKA ORDER SERVICE & SCRAPER
+	// 3) LOGIKA ORDER SERVICE (MIXING)
 	// ======================================================
 	
-	// A. Mixing
-	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID)
+	// Kirim req.SupplierID ke Service
+	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
+	
 	if mixErr != nil {
-		return c.JSON(500, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
+		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
+		return c.JSON(400, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
 	}
 
-	// B. Init Scraper
-	svc, err := scraper.NewMitraHiggsService(false) 
-
-if err != nil {
-    return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
-}
-defer svc.Close()
+	// ======================================================
+	// 4) EKSEKUSI SCRAPER (MITRA HIGGS ONLY)
+	// ======================================================
+	// TODO: Nanti logic ini bisa dibuat dinamis berdasarkan Tipe Supplier
+	// Untuk sekarang kita asumsikan ID supplier yang dikirim adalah tipe Mitra Higgs
+	
+	svc, err := scraper.NewMitraHiggsService(false) // False = Headless ON
+	if err != nil {
+		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
+	}
+	defer svc.Close()
 
 	if err := svc.Login(os.Getenv("MH_USERNAME"), os.Getenv("MH_PASSWORD")); err != nil {
 		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})
 	}
 
-	// C. Cari Item HTML ID (untuk tombol klik)
+	// Ambil ID Tombol HTML
 	var items []map[string]interface{}
 	queryExec := h.DB.Prisma.QueryRaw(
 		`SELECT sp.supplier_product_id 
@@ -139,11 +140,11 @@ defer svc.Close()
 		supplierOrder.ID,
 	)
 	if err := queryExec.Exec(ctx, &items); err != nil || len(items) == 0 {
-		return c.JSON(500, echo.Map{"error": "Mixing failed (No supplier items found)"})
+		return c.JSON(500, echo.Map{"error": "No items found for scraping"})
 	}
 	nominalID := items[0]["supplier_product_id"].(string)
 
-	// D. Eksekusi Robot (Looping)
+	// Eksekusi Robot
 	trxID, err := svc.PlaceOrder(req.Destination, nominalID, finalLoopCount)
 	if err != nil {
 		h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", err.Error(), supplierOrder.ID).Exec(ctx)
@@ -151,15 +152,15 @@ defer svc.Close()
 		return c.JSON(502, echo.Map{"error": "Provider failed: " + err.Error()})
 	}
 
-	// E. Sukses
+	// Sukses
 	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(ctx)
 	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(ctx)
 
 	return c.JSON(200, echo.Map{
 		"status":          "success",
-		"message":         "Order Processed Successfully",
+		"message":         "Order Processed",
 		"product":         product.Name,
+		"supplier_id":     req.SupplierID,
 		"trx_id":          trxID,
-		"quantity_loop":   finalLoopCount,
 	})
 }
