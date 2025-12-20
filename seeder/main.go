@@ -153,24 +153,41 @@ func main() {
 		Name     string
 		Price    int
 		Denom    int
-		BaseUUID string
-		Qty      int 
+		Recipes  []struct { // Update struktur jadi Slice of Struct
+			BaseUUID string
+			Qty      int
+		}
 	}{
-		{"Koin Emas 1M", 1500, 1000000, base1MID, 1},
-		{"Koin Emas 5M", 7500, 5000000, base1MID, 5}, // Loop 5x
-		{"Koin Emas 10M", 15000, 10000000, base1MID, 10}, 
-		{"Koin Emas 60M", 65000, 60000000, base60MID, 1}, 
-		{"Koin Emas 100M", 140000, 100000000, base1MID, 100},
-		{"Koin Emas 200M", 270000, 200000000, base1MID, 200},
+		// 1. Produk Simple (1M)
+		{
+			"Koin Emas 1M", 1500, 1000000, 
+			[]struct{BaseUUID string; Qty int}{ {base1MID, 1} },
+		},
+		// 2. Produk Simple Loop (5M = 5x 1M)
+		{
+			"Koin Emas 5M", 7500, 5000000, 
+			[]struct{BaseUUID string; Qty int}{ {base1MID, 5} },
+		},
+		// 3. PRODUK MIX (100M = 1x 60M + 40x 1M) <-- INI YANG BARU
+		{
+			"Koin Emas 100M (Mix Hemat)", 140000, 100000000, 
+			[]struct{BaseUUID string; Qty int}{ 
+				{base60MID, 1},  // Klik 60M 1 kali
+				{base1MID, 40},  // Klik 1M 40 kali
+			},
+		},
 	}
 
 	for _, p := range products {
 		// 1. Buat Produk Internal
+		// ID kita generate manual di code seeder ini agar aman (atau biarkan prisma generate)
+		// Disini kita biarkan Prisma generate, kita tangkap ID-nya
+		
 		newProd, err := client.Product.CreateOne(
 			db.Product.Name.Set(p.Name),
 			db.Product.Denom.Set(p.Denom),
 			db.Product.Price.Set(p.Price),
-			db.Product.Qty.Set(p.Qty), 
+			db.Product.Qty.Set(1), // Default header selalu 1
 			db.Product.Status.Set(true),
 		).Exec(ctx)
 		
@@ -181,14 +198,15 @@ func main() {
 		
 		log.Printf("✅ Produk Internal Created: %s", p.Name)
 
-		// 2. Buat Resep
-		client.ProductRecipe.CreateOne(
-			db.ProductRecipe.Quantity.Set(p.Qty), 
-			db.ProductRecipe.Product.Link(db.Product.ID.Equals(newProd.ID)),
-			db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(p.BaseUUID)),
-		).Exec(ctx)
-		
-		log.Printf("   -> Resep Created: %d x [SupplierUUID: %s]", p.Qty, p.BaseUUID)
+		// 2. Buat Resep (Looping recipe items)
+		for _, r := range p.Recipes {
+			client.ProductRecipe.CreateOne(
+				db.ProductRecipe.Quantity.Set(r.Qty), 
+				db.ProductRecipe.Product.Link(db.Product.ID.Equals(newProd.ID)),
+				db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(r.BaseUUID)),
+			).Exec(ctx)
+			log.Printf("   -> Resep Added: %d x [SupplierUUID: %s]", r.Qty, r.BaseUUID)
+		}
 	}
 
 	log.Println("🏁 Seeding Selesai!")

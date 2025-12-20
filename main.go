@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"gerbangapi/app/handlers"
-	"gerbangapi/app/routes" // Import package routes yang baru dibuat
+	"gerbangapi/app/routes"
 	"gerbangapi/app/services"
 	"gerbangapi/prisma/db"
 
@@ -60,6 +60,7 @@ func main() {
 	supplierHandler := handlers.NewSupplierHandler(client)
 	supplierProductHandler := handlers.NewSupplierProductHandler(client)
 	productHandler := handlers.NewProductHandler(client)
+	recipeHandler := handlers.NewRecipeHandler(client) // <--- (BARU) Init Recipe Handler
 
 	// ---------------------------------------------------------
 	// 5. REGISTER ROUTES (Panggil fungsi dari package routes)
@@ -72,6 +73,7 @@ func main() {
 		supplierHandler, 
 		supplierProductHandler, 
 		productHandler,
+		recipeHandler, // <--- (BARU) Masukkan ke Init
 	)
 
 	// 6. Start Server

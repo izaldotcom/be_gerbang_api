@@ -17,6 +17,7 @@ func Init(
 	supplierHandler *handlers.SupplierHandler,
 	supplierProductHandler *handlers.SupplierProductHandler,
 	productHandler *handlers.ProductHandler,
+	recipeHandler *handlers.RecipeHandler, // <--- (BARU) Terima parameter ini
 ) {
 	// Grouping v1
 	v1 := e.Group("/api/v1")
@@ -52,7 +53,16 @@ func Init(
 	protected.PUT("/supplier-products/:id", supplierProductHandler.Update)
 	protected.DELETE("/supplier-products/:id", supplierProductHandler.Delete)
 
-	// 4. User Profile
+	// 4. Recipe Items (CRUD DETAIL) <--- (BARU)
+	protected.POST("/recipes", recipeHandler.Create)
+	protected.GET("/recipes", recipeHandler.GetAll)
+	protected.GET("/recipes/:id", recipeHandler.GetByID)
+	protected.PUT("/recipes/replace", recipeHandler.ReplaceAll)
+	protected.PUT("/recipes/:id", recipeHandler.UpdateItem)
+	protected.PUT("/recipes", recipeHandler.UpdateItem)
+	protected.DELETE("/recipes/:id", recipeHandler.Delete)
+
+	// 5. User Profile
 	protected.GET("/get-profile", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{
 			"user_id": c.Get("user_id"),

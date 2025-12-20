@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"gerbangapi/app/services"
 	"gerbangapi/app/services/scraper"
@@ -42,7 +43,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		ProductID   string `json:"product_id"`
 		Destination string `json:"destination"`
 		RefID       string `json:"ref_id"`
-		SupplierID  string `json:"supplier_id"` // <-- FIELD BARU
+		SupplierID  string `json:"supplier_id"`
 	}
 
 	req := new(Req)
@@ -50,29 +51,24 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(400, echo.Map{"error": "Invalid request"})
 	}
 
-	// Validasi Input
 	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
 		return c.JSON(400, echo.Map{"error": "product_id, destination, dan supplier_id required"})
 	}
 
 	ctx := c.Request().Context()
 
-	// ======================================================
-	// 1) VALIDASI PRODUCT ID (UUID)
-	// ======================================================
+	// 1) VALIDASI PRODUCT (UUID / Name Fallback)
 	var product *db.ProductModel
 	var err error
 
-	// A. Cek UUID valid
 	product, err = h.DB.Product.FindUnique(
 		db.Product.ID.Equals(req.ProductID),
 	).Exec(ctx)
 
-	// B. Fallback cari by Nama
 	if err != nil {
 		log.Printf("⚠️ Input '%s' bukan UUID valid, mencari berdasarkan Nama...", req.ProductID)
 		product, err = h.DB.Product.FindFirst(
-			db.Product.Name.Contains(req.ProductID), 
+			db.Product.Name.Contains(req.ProductID),
 		).Exec(ctx)
 
 		if err != nil {
@@ -81,13 +77,12 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	realProductUUID := product.ID
-	finalLoopCount := product.Qty
+	// Note: Untuk produk MIX, qty di tabel product biasanya 1.
+	// Jumlah looping/klik sebenarnya ada di tabel supplier_order_item nanti.
 
-	log.Printf("✅ Order: %s | Supplier: %s | QtyLoop: %d", product.Name, req.SupplierID, finalLoopCount)
+	log.Printf("✅ Order: %s | Dest: %s | Supplier: %s", product.Name, req.Destination, req.SupplierID)
 
-	// ======================================================
 	// 2) INSERT INTERNAL ORDER
-	// ======================================================
 	internalOrderID := uuid.New().String()
 
 	_, err = h.DB.Prisma.ExecuteRaw(
@@ -101,11 +96,7 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(500, echo.Map{"error": "Database error: " + err.Error()})
 	}
 
-	// ======================================================
-	// 3) LOGIKA ORDER SERVICE (MIXING)
-	// ======================================================
-	
-	// Kirim req.SupplierID ke Service
+	// 3) MIXING PROCESS (Order Service)
 	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
 	
 	if mixErr != nil {
@@ -114,12 +105,37 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	// ======================================================
-	// 4) EKSEKUSI SCRAPER (MITRA HIGGS ONLY)
+	// 4) PERSIAPAN SCRAPER
 	// ======================================================
-	// TODO: Nanti logic ini bisa dibuat dinamis berdasarkan Tipe Supplier
-	// Untuk sekarang kita asumsikan ID supplier yang dikirim adalah tipe Mitra Higgs
 	
-	svc, err := scraper.NewMitraHiggsService(false) // False = Headless ON
+	// A. Query Items (AMBIL SEMUA, JANGAN LIMIT 1)
+	// Kita ambil HTML ID (supplier_product_id) dan Quantity (berapa kali klik)
+	type ItemToScrape struct {
+		HtmlID   string `json:"supplier_product_id"`
+		Quantity int    `json:"quantity"`
+	}
+	var items []ItemToScrape
+
+	// Query Join: supplier_order_item -> supplier_product
+	queryExec := h.DB.Prisma.QueryRaw(
+		`SELECT sp.supplier_product_id, soi.quantity 
+		 FROM supplier_order_item soi
+		 JOIN supplier_product sp ON soi.supplier_product_id = sp.id
+		 WHERE soi.supplier_order_id = ?`,
+		supplierOrder.ID,
+	)
+	
+	if err := queryExec.Exec(ctx, &items); err != nil {
+		return c.JSON(500, echo.Map{"error": "Failed to fetch order items"})
+	}
+
+	if len(items) == 0 {
+		return c.JSON(500, echo.Map{"error": "No items to scrape (Recipe empty?)"})
+	}
+
+	// B. Init Browser & Login (Cukup 1x di awal)
+	// Set isDebug=false agar headless (background)
+	svc, err := scraper.NewMitraHiggsService(false) 
 	if err != nil {
 		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
 	}
@@ -129,38 +145,56 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})
 	}
 
-	// Ambil ID Tombol HTML
-	var items []map[string]interface{}
-	queryExec := h.DB.Prisma.QueryRaw(
-		`SELECT sp.supplier_product_id 
-		 FROM supplier_product sp
-		 JOIN supplier_order_item soi ON soi.supplier_product_id = sp.id
-		 WHERE soi.supplier_order_id = ? 
-		 LIMIT 1`,
-		supplierOrder.ID,
-	)
-	if err := queryExec.Exec(ctx, &items); err != nil || len(items) == 0 {
-		return c.JSON(500, echo.Map{"error": "No items found for scraping"})
-	}
-	nominalID := items[0]["supplier_product_id"].(string)
+	// ======================================================
+	// 5) EKSEKUSI ITEM SATU PER SATU (LOOPING MIX)
+	// ======================================================
+	var allTrxIDs []string
+	var failedReasons []string
 
-	// Eksekusi Robot
-	trxID, err := svc.PlaceOrder(req.Destination, nominalID, finalLoopCount)
-	if err != nil {
-		h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", err.Error(), supplierOrder.ID).Exec(ctx)
+	for idx, item := range items {
+		log.Printf("🤖 Processing Item %d/%d: HTML_ID=%s, QtyLoop=%d", idx+1, len(items), item.HtmlID, item.Quantity)
+		
+		// Panggil Fungsi Scraper untuk Item ini
+		trxID, err := svc.PlaceOrder(req.Destination, item.HtmlID, item.Quantity)
+		
+		if err != nil {
+			log.Printf("❌ Gagal di item %s: %v", item.HtmlID, err)
+			failedReasons = append(failedReasons, err.Error())
+			// Opsional: Break loop jika satu gagal, atau lanjut?
+			// Biasanya jika satu gagal, transaksi dianggap gagal total.
+			break 
+		}
+		
+		allTrxIDs = append(allTrxIDs, trxID)
+	}
+
+	// ======================================================
+	// 6) FINALISASI STATUS
+	// ======================================================
+	
+	if len(failedReasons) > 0 {
+		// Jika ada error
+		errMsg := strings.Join(failedReasons, "; ")
+		h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", errMsg, supplierOrder.ID).Exec(ctx)
 		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
-		return c.JSON(502, echo.Map{"error": "Provider failed: " + err.Error()})
+		
+		return c.JSON(502, echo.Map{
+			"status": "failed",
+			"error":  "Provider partial/full failure: " + errMsg,
+			"success_trx": allTrxIDs, // Info transaksi yang sempat sukses
+		})
 	}
 
-	// Sukses
+	// Sukses Full
+	finalTrxString := strings.Join(allTrxIDs, ", ")
 	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(ctx)
 	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(ctx)
 
 	return c.JSON(200, echo.Map{
 		"status":          "success",
-		"message":         "Order Processed",
+		"message":         "Order Processed Successfully",
 		"product":         product.Name,
 		"supplier_id":     req.SupplierID,
-		"trx_id":          trxID,
+		"trx_ids":         finalTrxString,
 	})
 }
