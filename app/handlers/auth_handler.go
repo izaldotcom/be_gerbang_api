@@ -1,9 +1,8 @@
 package handlers
 
 import (
-	"net/http"
-
 	"gerbangapi/app/services"
+	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
@@ -12,18 +11,15 @@ type AuthHandler struct {
 	Service *services.AuthService
 }
 
-// ✅ Constructor (Dipanggil di main.go)
 func NewAuthHandler(service *services.AuthService) *AuthHandler {
-	return &AuthHandler{
-		Service: service,
-	}
+	return &AuthHandler{Service: service}
 }
 
-// --- REGISTER ---
+// ==========================================
+// 1. REGISTER USER
+// ==========================================
 func (h *AuthHandler) RegisterUser(c echo.Context) error {
-	// Request Struct sesuai kebutuhan input JSON
 	type Req struct {
-		ID       string `json:"id"`
 		RoleID   string `json:"role_id"`
 		Name     string `json:"name"`
 		Email    string `json:"email"`
@@ -34,35 +30,45 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request payload"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request format"})
 	}
 
-	// Mapping dari Req Handler -> Input Service Struct
-	input := services.RegisterInput{
-		ID:       req.ID,
+	// Validasi Input Dasar
+	if req.Email == "" || req.Password == "" || req.Name == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Name, Email, and Password are required"})
+	}
+
+	// Panggil Service Register
+	err := h.Service.Register(c.Request().Context(), services.RegisterInput{
 		RoleID:   req.RoleID,
 		Name:     req.Name,
 		Email:    req.Email,
 		Phone:    req.Phone,
 		Status:   req.Status,
 		Password: req.Password,
-	}
-
-	// Panggil Service (Sekarang menggunakan Method, bukan fungsi static)
-	err := h.Service.Register(c.Request().Context(), input)
+	})
 
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Registration failed: " + err.Error()})
 	}
 
-	return c.JSON(http.StatusCreated, echo.Map{"message": "register success"})
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "User registered successfully",
+		"data": echo.Map{
+			"email": req.Email,
+			"name":  req.Name,
+		},
+	})
 }
 
-// --- LOGIN ---
+// ==========================================
+// 2. LOGIN USER
+// ==========================================
 func (h *AuthHandler) LoginUser(c echo.Context) error {
 	type Req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Identifier string `json:"identifier"`
+		Email      string `json:"email"` // Fallback for backward compatibility
+		Password   string `json:"password"`
 	}
 
 	req := new(Req)
@@ -70,13 +76,24 @@ func (h *AuthHandler) LoginUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request payload"})
 	}
 
+	// Logic Identifier (Priority: identifier > email)
+	finalIdentifier := req.Identifier
+	if finalIdentifier == "" {
+		finalIdentifier = req.Email
+	}
+
+	if finalIdentifier == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Identifier (Email/Phone) is required"})
+	}
+
 	// Panggil Service Login
 	tokenResp, err := h.Service.Login(c.Request().Context(), services.LoginInput{
-		Email:    req.Email,
-		Password: req.Password,
+		Identifier: finalIdentifier,
+		Password:   req.Password,
 	})
 
 	if err != nil {
+		// Return 401 Unauthorized
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": err.Error()})
 	}
 
@@ -84,11 +101,13 @@ func (h *AuthHandler) LoginUser(c echo.Context) error {
 		"message":       "login success",
 		"access_token":  tokenResp.AccessToken,
 		"refresh_token": tokenResp.RefreshToken,
+		"user":          tokenResp.User,
 	})
 }
 
-// --- REFRESH TOKEN ---
-// Sekarang menjadi Method agar bisa akses DB via Service
+// ==========================================
+// 3. REFRESH TOKEN
+// ==========================================
 func (h *AuthHandler) RefreshToken(c echo.Context) error {
 	type Req struct {
 		RefreshToken string `json:"refresh_token"`
@@ -96,10 +115,9 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid JSON"})
 	}
 
-	// Panggil Service RefreshTokenProcess
 	newAccessToken, err := h.Service.RefreshTokenProcess(c.Request().Context(), req.RefreshToken)
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": err.Error()})
@@ -107,5 +125,26 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"access_token": newAccessToken,
+	})
+}
+
+// ==========================================
+// 4. GET CURRENT USER (ME) - VIA REDIS
+// ==========================================
+func (h *AuthHandler) Me(c echo.Context) error {
+	// Ambil UserID dari Context (diset oleh Middleware JWT)
+	userID, ok := c.Get("user_id").(string)
+	if !ok || userID == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
+	}
+
+	// Ambil session dari Redis
+	session, err := h.Service.GetSession(c.Request().Context(), userID)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Session expired or invalid"})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"data": session,
 	})
 }

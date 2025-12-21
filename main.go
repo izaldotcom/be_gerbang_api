@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/redis/go-redis/v9" // <--- Import Redis
 )
 
 func main() {
@@ -28,16 +30,34 @@ func main() {
 	}
 	serverAddress := fmt.Sprintf(":%s", port)
 
-	// 2. Setup DB Connections
+	// 2. Setup DB Connections (Prisma)
 	client := db.NewClient()
 	if err := client.Prisma.Connect(); err != nil {
 		log.Fatal("❌ Prisma failed to connect:", err)
 	}
 	defer client.Prisma.Disconnect()
 
-	db.ConnectRedis()
+	// 3. Setup Redis Connection
+	// Kita inisialisasi disini agar variabel 'redisClient' bisa di-passing ke Service
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379" // Default address
+	}
 
-	// 3. Create Echo Instance & Global Middleware
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	// Cek koneksi Redis
+	if _, err := redisClient.Ping(context.Background()).Result(); err != nil {
+		log.Printf("⚠️  Warning: Gagal connect ke Redis: %v", err)
+	} else {
+		log.Println("✅ Redis Connected")
+	}
+
+	// 4. Create Echo Instance & Global Middleware
 	e := echo.New()
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -45,38 +65,40 @@ func main() {
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 
 	// ---------------------------------------------------------
-	// 4. DEPENDENCY INJECTION (Services & Handlers)
+	// 5. DEPENDENCY INJECTION (Services & Handlers)
 	// ---------------------------------------------------------
-	
+
 	// A. Services
-	authService := services.NewAuthService(client)
+	// [UPDATE] Inject Redis Client ke Auth Service
+	authService := services.NewAuthService(client, redisClient)
+	
 	orderService := services.NewOrderService(client)
 
 	// B. Handlers
 	authHandler := handlers.NewAuthHandler(authService)
-	sellerHandler := handlers.NewSellerHandler(client, orderService)
-	
+	sellerHandler := handlers.NewSellerHandler(client, orderService, redisClient)
+
 	// CRUD Handlers
 	supplierHandler := handlers.NewSupplierHandler(client)
 	supplierProductHandler := handlers.NewSupplierProductHandler(client)
 	productHandler := handlers.NewProductHandler(client)
-	recipeHandler := handlers.NewRecipeHandler(client) // <--- (BARU) Init Recipe Handler
+	recipeHandler := handlers.NewRecipeHandler(client)
 
 	// ---------------------------------------------------------
-	// 5. REGISTER ROUTES (Panggil fungsi dari package routes)
+	// 6. REGISTER ROUTES
 	// ---------------------------------------------------------
 	routes.Init(
-		e, 
-		client, 
-		authHandler, 
-		sellerHandler, 
-		supplierHandler, 
-		supplierProductHandler, 
+		e,
+		client,
+		authHandler,
+		sellerHandler,
+		supplierHandler,
+		supplierProductHandler,
 		productHandler,
-		recipeHandler, // <--- (BARU) Masukkan ke Init
+		recipeHandler,
 	)
 
-	// 6. Start Server
+	// 7. Start Server
 	log.Printf("🚀 Server running on http://localhost%s", serverAddress)
 	e.Logger.Fatal(e.Start(serverAddress))
 }

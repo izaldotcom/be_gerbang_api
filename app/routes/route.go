@@ -35,6 +35,9 @@ func Init(
 	protected := v1.Group("")
 	protected.Use(mid.JWTMiddleware())
 
+	// [BARU] Endpoint Auth Me
+	protected.GET("/auth/me", authHandler.Me)
+
 	// 1. Internal Products (CRUD)
 	protected.POST("/products", productHandler.Create)
 	protected.GET("/products", productHandler.GetAll)
