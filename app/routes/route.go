@@ -38,8 +38,8 @@ func Init(
 	// 1. Internal Products (CRUD)
 	protected.POST("/products", productHandler.Create)
 	protected.GET("/products", productHandler.GetAll)
-	protected.PUT("/products/:id", productHandler.Update)
-	protected.DELETE("/products/:id", productHandler.Delete)
+	protected.PUT("/products", productHandler.Update)
+	protected.DELETE("/products", productHandler.Delete)
 
 	// 2. Suppliers (CRUD)
 	protected.POST("/suppliers", supplierHandler.Create)

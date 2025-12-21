@@ -32,20 +32,24 @@ func main() {
 	// 🧹 STEP 0: CLEAN UP DATA (URUTAN PENTING!)
 	// ==========================================
 	log.Println("🧹 Membersihkan data lama...")
-	
-	// Hapus dari tabel Child (yang punya Foreign Key) dulu
+
+	// Hapus Child dulu (Foreign Key constraints)
 	client.SupplierOrderItem.FindMany().Delete().Exec(ctx)
 	client.SupplierOrder.FindMany().Delete().Exec(ctx)
 	client.InternalOrder.FindMany().Delete().Exec(ctx)
 	client.ProductRecipe.FindMany().Delete().Exec(ctx)
+	
+    // Product & SupplierProduct harus dihapus sebelum Supplier
+    client.Product.FindMany().Delete().Exec(ctx) 
 	client.SupplierProduct.FindMany().Delete().Exec(ctx)
-	client.Product.FindMany().Delete().Exec(ctx)
+    
+    // Baru hapus Parent
 	client.Supplier.FindMany().Delete().Exec(ctx)
 	client.APIKey.FindMany().Delete().Exec(ctx)
 	client.RefreshToken.FindMany().Delete().Exec(ctx)
 	client.User.FindMany().Delete().Exec(ctx)
 	client.Role.FindMany().Delete().Exec(ctx)
-	
+
 	log.Println("✨ Database bersih!")
 	log.Println("🚀 Memulai Seeding Baru...")
 
@@ -66,7 +70,7 @@ func main() {
 	// ==========================================
 	adminRole, _ := client.Role.FindFirst(db.Role.Name.Equals("Admin")).Exec(ctx)
 	adminEmail := "admin@gerbangapi.com"
-	
+
 	hashedPwd, _ := utils.HashPassword("password123")
 	newUser, err := client.User.CreateOne(
 		db.User.Name.Set("Super Administrator"),
@@ -78,7 +82,7 @@ func main() {
 
 	if err == nil {
 		log.Printf("✅ ADMIN DIBUAT: %s (UUID: %s)", adminEmail, newUser.ID)
-		
+
 		// 3. API KEY
 		client.APIKey.CreateOne(
 			db.APIKey.User.Link(db.User.ID.Equals(newUser.ID)),
@@ -95,10 +99,10 @@ func main() {
 	suppCode := "MH_OFFICIAL"
 	newSupp, err := client.Supplier.CreateOne(
 		db.Supplier.Name.Set("Mitra Higgs Official"),
-		db.Supplier.Type.Set("official"), 
-		db.Supplier.Code.Set(suppCode), 
+		db.Supplier.Type.Set("official"),
+		db.Supplier.Code.Set(suppCode),
 	).Exec(ctx)
-	
+
 	if err != nil {
 		log.Fatal("❌ Gagal buat supplier: ", err)
 	}
@@ -108,17 +112,17 @@ func main() {
 	// ======================================================
 	// 5. SUPPLIER PRODUCTS (Modal Dasar)
 	// ======================================================
-	
+
 	var base1MID, base60MID string
 
 	// --- BASE 1: Koin 1M (ID HTML '6') ---
 	newSp1, _ := client.SupplierProduct.CreateOne(
 		// WAJIB (Scalar)
-		db.SupplierProduct.SupplierProductID.Set("6"), 
+		db.SupplierProduct.SupplierProductID.Set("6"),
 		db.SupplierProduct.Name.Set("Base Koin 1M"),
 		db.SupplierProduct.Denom.Set(1000000),
 		db.SupplierProduct.CostPrice.Set(1000),
-		
+
 		// WAJIB (Relasi)
 		db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(supplierID)),
 
@@ -131,11 +135,11 @@ func main() {
 	// --- BASE 2: Koin 60M (ID HTML '1') ---
 	newSp60, _ := client.SupplierProduct.CreateOne(
 		// WAJIB (Scalar)
-		db.SupplierProduct.SupplierProductID.Set("1"), 
+		db.SupplierProduct.SupplierProductID.Set("1"),
 		db.SupplierProduct.Name.Set("Base Koin 60M"),
 		db.SupplierProduct.Denom.Set(60000000),
 		db.SupplierProduct.CostPrice.Set(60000),
-		
+
 		// WAJIB (Relasi)
 		db.SupplierProduct.Supplier.Link(db.Supplier.ID.Equals(supplierID)),
 
@@ -148,64 +152,79 @@ func main() {
 	// ======================================================
 	// 6. INTERNAL PRODUCTS & RECIPES
 	// ======================================================
-	
+
 	products := []struct {
-		Name     string
-		Price    int
-		Denom    int
-		Recipes  []struct { // Update struktur jadi Slice of Struct
+		Name    string
+		Price   int
+		Denom   int
+		Recipes []struct {
 			BaseUUID string
 			Qty      int
 		}
 	}{
 		// 1. Produk Simple (1M)
 		{
-			"Koin Emas 1M", 1500, 1000000, 
-			[]struct{BaseUUID string; Qty int}{ {base1MID, 1} },
+			"Koin Emas 1M", 1500, 1000000,
+			[]struct {
+				BaseUUID string
+				Qty      int
+			}{{base1MID, 1}},
 		},
 		// 2. Produk Simple Loop (5M = 5x 1M)
 		{
-			"Koin Emas 5M", 7500, 5000000, 
-			[]struct{BaseUUID string; Qty int}{ {base1MID, 5} },
+			"Koin Emas 5M", 7500, 5000000,
+			[]struct {
+				BaseUUID string
+				Qty      int
+			}{{base1MID, 5}},
 		},
-		// 3. PRODUK MIX (100M = 1x 60M + 40x 1M) <-- INI YANG BARU
+		// 3. PRODUK MIX (100M = 1x 60M + 40x 1M)
 		{
-			"Koin Emas 100M (Mix Hemat)", 140000, 100000000, 
-			[]struct{BaseUUID string; Qty int}{ 
-				{base60MID, 1},  // Klik 60M 1 kali
-				{base1MID, 40},  // Klik 1M 40 kali
+			"Koin Emas 100M (Mix Hemat)", 140000, 100000000,
+			[]struct {
+				BaseUUID string
+				Qty      int
+			}{
+				{base60MID, 1}, // Klik 60M 1 kali
+				{base1MID, 40}, // Klik 1M 40 kali
 			},
 		},
 	}
 
 	for _, p := range products {
 		// 1. Buat Produk Internal
-		// ID kita generate manual di code seeder ini agar aman (atau biarkan prisma generate)
-		// Disini kita biarkan Prisma generate, kita tangkap ID-nya
-		
+		// PERBAIKAN: Menambahkan .Link ke SupplierID (Wajib karena Schema berubah)
 		newProd, err := client.Product.CreateOne(
 			db.Product.Name.Set(p.Name),
 			db.Product.Denom.Set(p.Denom),
 			db.Product.Price.Set(p.Price),
-			db.Product.Qty.Set(1), // Default header selalu 1
+			db.Product.Qty.Set(1),
 			db.Product.Status.Set(true),
+			
+            // --- [FIX] LINK KE SUPPLIER ---
+			db.Product.Supplier.Link(db.Supplier.ID.Equals(supplierID)), 
 		).Exec(ctx)
-		
+
 		if err != nil {
 			log.Printf("❌ Gagal create product %s: %v", p.Name, err)
 			continue
 		}
-		
+
 		log.Printf("✅ Produk Internal Created: %s", p.Name)
 
 		// 2. Buat Resep (Looping recipe items)
 		for _, r := range p.Recipes {
-			client.ProductRecipe.CreateOne(
-				db.ProductRecipe.Quantity.Set(r.Qty), 
+			_, err := client.ProductRecipe.CreateOne(
+				db.ProductRecipe.Quantity.Set(r.Qty),
 				db.ProductRecipe.Product.Link(db.Product.ID.Equals(newProd.ID)),
 				db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(r.BaseUUID)),
 			).Exec(ctx)
-			log.Printf("   -> Resep Added: %d x [SupplierUUID: %s]", r.Qty, r.BaseUUID)
+
+			if err != nil {
+				log.Printf("   ⚠️ Gagal tambah resep: %v", err)
+			} else {
+				log.Printf("   -> Resep Added: %d x [BaseUUID: ...%s]", r.Qty, r.BaseUUID[len(r.BaseUUID)-5:])
+			}
 		}
 	}
 

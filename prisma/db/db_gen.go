@@ -145,10 +145,14 @@ model Supplier {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  products InternalProduct[] @relation("SupplierProducts")
-
+  // Relasi yang sudah ada
+  products         InternalProduct[] @relation("SupplierProducts")
   supplierProducts SupplierProduct[]
   supplierOrders   SupplierOrder[]
+
+  // === [BARU] Relasi ke Product Utama ===
+  // Dinamai 'MainProducts' agar tidak bentrok dengan 'products' di atas
+  MainProducts Product[]
 
   @@map("supplier")
 }
@@ -234,7 +238,11 @@ model SupplierProduct {
 }
 
 model Product {
-  id         String   @id @default(uuid())
+  id String @id @default(uuid())
+
+  // === [BARU] Field Supplier ID ===
+  supplier_id String
+
   name       String
   denom      Int
   price      Int
@@ -242,6 +250,9 @@ model Product {
   status     Boolean  @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+
+  // === [BARU] Relasi Supplier ===
+  Supplier Supplier @relation(fields: [supplier_id], references: [id])
 
   recipe ProductRecipe[]
   orders InternalOrder[]
@@ -575,14 +586,15 @@ const (
 type ProductScalarFieldEnum string
 
 const (
-	ProductScalarFieldEnumID        ProductScalarFieldEnum = "id"
-	ProductScalarFieldEnumName      ProductScalarFieldEnum = "name"
-	ProductScalarFieldEnumDenom     ProductScalarFieldEnum = "denom"
-	ProductScalarFieldEnumPrice     ProductScalarFieldEnum = "price"
-	ProductScalarFieldEnumQty       ProductScalarFieldEnum = "qty"
-	ProductScalarFieldEnumStatus    ProductScalarFieldEnum = "status"
-	ProductScalarFieldEnumCreatedAt ProductScalarFieldEnum = "created_at"
-	ProductScalarFieldEnumUpdatedAt ProductScalarFieldEnum = "updated_at"
+	ProductScalarFieldEnumID         ProductScalarFieldEnum = "id"
+	ProductScalarFieldEnumSupplierID ProductScalarFieldEnum = "supplier_id"
+	ProductScalarFieldEnumName       ProductScalarFieldEnum = "name"
+	ProductScalarFieldEnumDenom      ProductScalarFieldEnum = "denom"
+	ProductScalarFieldEnumPrice      ProductScalarFieldEnum = "price"
+	ProductScalarFieldEnumQty        ProductScalarFieldEnum = "qty"
+	ProductScalarFieldEnumStatus     ProductScalarFieldEnum = "status"
+	ProductScalarFieldEnumCreatedAt  ProductScalarFieldEnum = "created_at"
+	ProductScalarFieldEnumUpdatedAt  ProductScalarFieldEnum = "updated_at"
 )
 
 type ProductRecipeScalarFieldEnum string
@@ -735,8 +747,9 @@ const (
 type ProductOrderByRelevanceFieldEnum string
 
 const (
-	ProductOrderByRelevanceFieldEnumID   ProductOrderByRelevanceFieldEnum = "id"
-	ProductOrderByRelevanceFieldEnumName ProductOrderByRelevanceFieldEnum = "name"
+	ProductOrderByRelevanceFieldEnumID         ProductOrderByRelevanceFieldEnum = "id"
+	ProductOrderByRelevanceFieldEnumSupplierID ProductOrderByRelevanceFieldEnum = "supplier_id"
+	ProductOrderByRelevanceFieldEnumName       ProductOrderByRelevanceFieldEnum = "name"
 )
 
 type ProductRecipeOrderByRelevanceFieldEnum string
@@ -903,6 +916,8 @@ const supplierFieldSupplierProducts supplierPrismaFields = "supplierProducts"
 
 const supplierFieldSupplierOrders supplierPrismaFields = "supplierOrders"
 
+const supplierFieldMainProducts supplierPrismaFields = "MainProducts"
+
 const supplierFieldRelevance supplierPrismaFields = "relevance"
 
 type internalProductPrismaFields = prismaFields
@@ -1021,6 +1036,8 @@ type productPrismaFields = prismaFields
 
 const productFieldID productPrismaFields = "id"
 
+const productFieldSupplierID productPrismaFields = "supplier_id"
+
 const productFieldName productPrismaFields = "name"
 
 const productFieldDenom productPrismaFields = "denom"
@@ -1034,6 +1051,8 @@ const productFieldStatus productPrismaFields = "status"
 const productFieldCreatedAt productPrismaFields = "created_at"
 
 const productFieldUpdatedAt productPrismaFields = "updated_at"
+
+const productFieldSupplier productPrismaFields = "Supplier"
 
 const productFieldRecipe productPrismaFields = "recipe"
 
@@ -2046,6 +2065,7 @@ type RelationsSupplier struct {
 	Products         []InternalProductModel `json:"products,omitempty"`
 	SupplierProducts []SupplierProductModel `json:"supplierProducts,omitempty"`
 	SupplierOrders   []SupplierOrderModel   `json:"supplierOrders,omitempty"`
+	MainProducts     []ProductModel         `json:"MainProducts,omitempty"`
 }
 
 func (r SupplierModel) BaseURL() (value String, ok bool) {
@@ -2074,6 +2094,13 @@ func (r SupplierModel) SupplierOrders() (value []SupplierOrderModel) {
 		panic("attempted to access supplierOrders but did not fetch it using the .With() syntax")
 	}
 	return r.RelationsSupplier.SupplierOrders
+}
+
+func (r SupplierModel) MainProducts() (value []ProductModel) {
+	if r.RelationsSupplier.MainProducts == nil {
+		panic("attempted to access mainProducts but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsSupplier.MainProducts
 }
 
 // InternalProductModel represents the InternalProduct model and is a wrapper for accessing fields and methods
@@ -2383,32 +2410,42 @@ type ProductModel struct {
 
 // InnerProduct holds the actual data
 type InnerProduct struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Denom     int      `json:"denom"`
-	Price     int      `json:"price"`
-	Qty       int      `json:"qty"`
-	Status    bool     `json:"status"`
-	CreatedAt DateTime `json:"created_at"`
-	UpdatedAt DateTime `json:"updated_at"`
+	ID         string   `json:"id"`
+	SupplierID string   `json:"supplier_id"`
+	Name       string   `json:"name"`
+	Denom      int      `json:"denom"`
+	Price      int      `json:"price"`
+	Qty        int      `json:"qty"`
+	Status     bool     `json:"status"`
+	CreatedAt  DateTime `json:"created_at"`
+	UpdatedAt  DateTime `json:"updated_at"`
 }
 
 // RawProductModel is a struct for Product when used in raw queries
 type RawProductModel struct {
-	ID        RawString   `json:"id"`
-	Name      RawString   `json:"name"`
-	Denom     RawInt      `json:"denom"`
-	Price     RawInt      `json:"price"`
-	Qty       RawInt      `json:"qty"`
-	Status    RawBoolean  `json:"status"`
-	CreatedAt RawDateTime `json:"created_at"`
-	UpdatedAt RawDateTime `json:"updated_at"`
+	ID         RawString   `json:"id"`
+	SupplierID RawString   `json:"supplier_id"`
+	Name       RawString   `json:"name"`
+	Denom      RawInt      `json:"denom"`
+	Price      RawInt      `json:"price"`
+	Qty        RawInt      `json:"qty"`
+	Status     RawBoolean  `json:"status"`
+	CreatedAt  RawDateTime `json:"created_at"`
+	UpdatedAt  RawDateTime `json:"updated_at"`
 }
 
 // RelationsProduct holds the relation data separately
 type RelationsProduct struct {
-	Recipe []ProductRecipeModel `json:"recipe,omitempty"`
-	Orders []InternalOrderModel `json:"orders,omitempty"`
+	Supplier *SupplierModel       `json:"Supplier,omitempty"`
+	Recipe   []ProductRecipeModel `json:"recipe,omitempty"`
+	Orders   []InternalOrderModel `json:"orders,omitempty"`
+}
+
+func (r ProductModel) Supplier() (value *SupplierModel) {
+	if r.RelationsProduct.Supplier == nil {
+		panic("attempted to access supplier but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsProduct.Supplier
 }
 
 func (r ProductModel) Recipe() (value []ProductRecipeModel) {
@@ -12294,6 +12331,8 @@ type supplierQuery struct {
 
 	SupplierOrders supplierQuerySupplierOrdersRelations
 
+	MainProducts supplierQueryMainProductsRelations
+
 	// Relevance_
 	//
 	// @optional
@@ -15335,6 +15374,178 @@ func (r supplierQuerySupplierOrdersRelations) Unlink(
 
 func (r supplierQuerySupplierOrdersSupplierOrder) Field() supplierPrismaFields {
 	return supplierFieldSupplierOrders
+}
+
+// base struct
+type supplierQueryMainProductsProduct struct{}
+
+type supplierQueryMainProductsRelations struct{}
+
+// Supplier -> MainProducts
+//
+// @relation
+// @required
+func (supplierQueryMainProductsRelations) Some(
+	params ...ProductWhereParam,
+) supplierDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "MainProducts",
+			Fields: []builder.Field{
+				{
+					Name:   "some",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// Supplier -> MainProducts
+//
+// @relation
+// @required
+func (supplierQueryMainProductsRelations) Every(
+	params ...ProductWhereParam,
+) supplierDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "MainProducts",
+			Fields: []builder.Field{
+				{
+					Name:   "every",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// Supplier -> MainProducts
+//
+// @relation
+// @required
+func (supplierQueryMainProductsRelations) None(
+	params ...ProductWhereParam,
+) supplierDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "MainProducts",
+			Fields: []builder.Field{
+				{
+					Name:   "none",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (supplierQueryMainProductsRelations) Fetch(
+
+	params ...ProductWhereParam,
+
+) supplierToMainProductsFindMany {
+	var v supplierToMainProductsFindMany
+
+	v.query.Operation = "query"
+	v.query.Method = "MainProducts"
+	v.query.Outputs = productOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r supplierQueryMainProductsRelations) Link(
+	params ...ProductWhereParam,
+) supplierSetParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return supplierSetParam{
+		data: builder.Field{
+			Name: "MainProducts",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+
+					List:     true,
+					WrapList: true,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryMainProductsRelations) Unlink(
+	params ...ProductWhereParam,
+) supplierSetParam {
+	var v supplierSetParam
+
+	var fields []builder.Field
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+	v = supplierSetParam{
+		data: builder.Field{
+			Name: "MainProducts",
+			Fields: []builder.Field{
+				{
+					Name:     "disconnect",
+					List:     true,
+					WrapList: true,
+					Fields:   builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r supplierQueryMainProductsProduct) Field() supplierPrismaFields {
+	return supplierFieldMainProducts
 }
 
 // base struct
@@ -30120,6 +30331,11 @@ type productQuery struct {
 	// @required
 	ID productQueryIDString
 
+	// SupplierID
+	//
+	// @required
+	SupplierID productQuerySupplierIDString
+
 	// Name
 	//
 	// @required
@@ -30154,6 +30370,8 @@ type productQuery struct {
 	//
 	// @required
 	UpdatedAt productQueryUpdatedAtDateTime
+
+	Supplier productQuerySupplierRelations
 
 	Recipe productQueryRecipeRelations
 
@@ -30561,6 +30779,353 @@ func (r productQueryIDString) HasSuffixIfPresent(value *string) productParamUniq
 
 func (r productQueryIDString) Field() productPrismaFields {
 	return productFieldID
+}
+
+// base struct
+type productQuerySupplierIDString struct{}
+
+// Set the required value of SupplierID
+func (r productQuerySupplierIDString) Set(value string) productSetParam {
+
+	return productSetParam{
+		data: builder.Field{
+			Name:  "supplier_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of SupplierID dynamically
+func (r productQuerySupplierIDString) SetIfPresent(value *String) productSetParam {
+	if value == nil {
+		return productSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r productQuerySupplierIDString) Equals(value string) productWithPrismaSupplierIDEqualsParam {
+
+	return productWithPrismaSupplierIDEqualsParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) EqualsIfPresent(value *string) productWithPrismaSupplierIDEqualsParam {
+	if value == nil {
+		return productWithPrismaSupplierIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r productQuerySupplierIDString) Order(direction SortOrder) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name:  "supplier_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) Cursor(cursor string) productCursorParam {
+	return productCursorParam{
+		data: builder.Field{
+			Name:  "supplier_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) In(value []string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) InIfPresent(value []string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r productQuerySupplierIDString) NotIn(value []string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) NotInIfPresent(value []string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r productQuerySupplierIDString) Lt(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) LtIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r productQuerySupplierIDString) Lte(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) LteIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r productQuerySupplierIDString) Gt(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) GtIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r productQuerySupplierIDString) Gte(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) GteIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r productQuerySupplierIDString) Contains(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) ContainsIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r productQuerySupplierIDString) StartsWith(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) StartsWithIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r productQuerySupplierIDString) EndsWith(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) EndsWithIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r productQuerySupplierIDString) Search(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) SearchIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r productQuerySupplierIDString) Not(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierIDString) NotIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r productQuerySupplierIDString) HasPrefix(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r productQuerySupplierIDString) HasPrefixIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r productQuerySupplierIDString) HasSuffix(value string) productDefaultParam {
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "supplier_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r productQuerySupplierIDString) HasSuffixIfPresent(value *string) productDefaultParam {
+	if value == nil {
+		return productDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r productQuerySupplierIDString) Field() productPrismaFields {
+	return productFieldSupplierID
 }
 
 // base struct
@@ -32795,6 +33360,94 @@ func (r productQueryUpdatedAtDateTime) AfterEqualsIfPresent(value *DateTime) pro
 
 func (r productQueryUpdatedAtDateTime) Field() productPrismaFields {
 	return productFieldUpdatedAt
+}
+
+// base struct
+type productQuerySupplierSupplier struct{}
+
+type productQuerySupplierRelations struct{}
+
+// Product -> Supplier
+//
+// @relation
+// @required
+func (productQuerySupplierRelations) Where(
+	params ...SupplierWhereParam,
+) productDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return productDefaultParam{
+		data: builder.Field{
+			Name: "Supplier",
+			Fields: []builder.Field{
+				{
+					Name:   "is",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (productQuerySupplierRelations) Fetch() productToSupplierFindUnique {
+	var v productToSupplierFindUnique
+
+	v.query.Operation = "query"
+	v.query.Method = "Supplier"
+	v.query.Outputs = supplierOutput
+
+	return v
+}
+
+func (r productQuerySupplierRelations) Link(
+	params SupplierWhereParam,
+) productWithPrismaSupplierSetParam {
+	var fields []builder.Field
+
+	f := params.field()
+	if f.Fields == nil && f.Value == nil {
+		return productWithPrismaSupplierSetParam{}
+	}
+
+	fields = append(fields, f)
+
+	return productWithPrismaSupplierSetParam{
+		data: builder.Field{
+			Name: "Supplier",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+}
+
+func (r productQuerySupplierRelations) Unlink() productWithPrismaSupplierSetParam {
+	var v productWithPrismaSupplierSetParam
+
+	v = productWithPrismaSupplierSetParam{
+		data: builder.Field{
+			Name: "Supplier",
+			Fields: []builder.Field{
+				{
+					Name:  "disconnect",
+					Value: true,
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r productQuerySupplierSupplier) Field() productPrismaFields {
+	return productFieldSupplier
 }
 
 // base struct
@@ -47561,6 +48214,84 @@ func (p supplierWithPrismaSupplierOrdersEqualsUniqueParam) supplierOrdersField()
 func (supplierWithPrismaSupplierOrdersEqualsUniqueParam) unique() {}
 func (supplierWithPrismaSupplierOrdersEqualsUniqueParam) equals() {}
 
+type SupplierWithPrismaMainProductsEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	supplierModel()
+	mainProductsField()
+}
+
+type SupplierWithPrismaMainProductsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	mainProductsField()
+}
+
+type supplierWithPrismaMainProductsSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaMainProductsSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaMainProductsSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaMainProductsSetParam) supplierModel() {}
+
+func (p supplierWithPrismaMainProductsSetParam) mainProductsField() {}
+
+type SupplierWithPrismaMainProductsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	mainProductsField()
+}
+
+type supplierWithPrismaMainProductsEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaMainProductsEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaMainProductsEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaMainProductsEqualsParam) supplierModel() {}
+
+func (p supplierWithPrismaMainProductsEqualsParam) mainProductsField() {}
+
+func (supplierWithPrismaMainProductsSetParam) settable()  {}
+func (supplierWithPrismaMainProductsEqualsParam) equals() {}
+
+type supplierWithPrismaMainProductsEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaMainProductsEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaMainProductsEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaMainProductsEqualsUniqueParam) supplierModel()     {}
+func (p supplierWithPrismaMainProductsEqualsUniqueParam) mainProductsField() {}
+
+func (supplierWithPrismaMainProductsEqualsUniqueParam) unique() {}
+func (supplierWithPrismaMainProductsEqualsUniqueParam) equals() {}
+
 type internalProductActions struct {
 	// client holds the prisma client
 	client *PrismaClient
@@ -52053,6 +52784,7 @@ type productActions struct {
 
 var productOutput = []builder.Output{
 	{Name: "id"},
+	{Name: "supplier_id"},
 	{Name: "name"},
 	{Name: "denom"},
 	{Name: "price"},
@@ -52218,13 +52950,18 @@ type productSetParam struct {
 	data builder.Field
 }
 
-// getQuery implements ProductWithPrismaNameSetParam.
+// nameField implements ProductWithPrismaNameSetParam.
+func (p productSetParam) nameField() {
+	panic("unimplemented")
+}
+
+// getQuery implements ProductWithPrismaSupplierSetParam.
 func (p productSetParam) getQuery() builder.Query {
 	panic("unimplemented")
 }
 
-// nameField implements ProductWithPrismaNameSetParam.
-func (p productSetParam) nameField() {
+// supplierField implements ProductWithPrismaSupplierSetParam.
+func (p productSetParam) supplierField() {
 	panic("unimplemented")
 }
 
@@ -52313,6 +53050,84 @@ func (p productWithPrismaIDEqualsUniqueParam) idField()      {}
 
 func (productWithPrismaIDEqualsUniqueParam) unique() {}
 func (productWithPrismaIDEqualsUniqueParam) equals() {}
+
+type ProductWithPrismaSupplierIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	productModel()
+	supplierIDField()
+}
+
+type ProductWithPrismaSupplierIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	supplierIDField()
+}
+
+type productWithPrismaSupplierIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierIDSetParam) productModel() {}
+
+func (p productWithPrismaSupplierIDSetParam) supplierIDField() {}
+
+type ProductWithPrismaSupplierIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	supplierIDField()
+}
+
+type productWithPrismaSupplierIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierIDEqualsParam) productModel() {}
+
+func (p productWithPrismaSupplierIDEqualsParam) supplierIDField() {}
+
+func (productWithPrismaSupplierIDSetParam) settable()  {}
+func (productWithPrismaSupplierIDEqualsParam) equals() {}
+
+type productWithPrismaSupplierIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierIDEqualsUniqueParam) productModel()    {}
+func (p productWithPrismaSupplierIDEqualsUniqueParam) supplierIDField() {}
+
+func (productWithPrismaSupplierIDEqualsUniqueParam) unique() {}
+func (productWithPrismaSupplierIDEqualsUniqueParam) equals() {}
 
 type ProductWithPrismaNameEqualsSetParam interface {
 	field() builder.Field
@@ -52581,6 +53396,11 @@ type ProductWithPrismaQtySetParam interface {
 type productWithPrismaQtySetParam struct {
 	data  builder.Field
 	query builder.Query
+}
+
+// supplierField implements ProductWithPrismaSupplierSetParam.
+func (p productWithPrismaQtySetParam) supplierField() {
+	panic("unimplemented")
 }
 
 func (p productWithPrismaQtySetParam) field() builder.Field {
@@ -52874,6 +53694,84 @@ func (p productWithPrismaUpdatedAtEqualsUniqueParam) updatedAtField() {}
 
 func (productWithPrismaUpdatedAtEqualsUniqueParam) unique() {}
 func (productWithPrismaUpdatedAtEqualsUniqueParam) equals() {}
+
+type ProductWithPrismaSupplierEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	productModel()
+	supplierField()
+}
+
+type ProductWithPrismaSupplierSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	supplierField()
+}
+
+type productWithPrismaSupplierSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierSetParam) productModel() {}
+
+func (p productWithPrismaSupplierSetParam) supplierField() {}
+
+type ProductWithPrismaSupplierWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	productModel()
+	supplierField()
+}
+
+type productWithPrismaSupplierEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierEqualsParam) productModel() {}
+
+func (p productWithPrismaSupplierEqualsParam) supplierField() {}
+
+func (productWithPrismaSupplierSetParam) settable()  {}
+func (productWithPrismaSupplierEqualsParam) equals() {}
+
+type productWithPrismaSupplierEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p productWithPrismaSupplierEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p productWithPrismaSupplierEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p productWithPrismaSupplierEqualsUniqueParam) productModel()  {}
+func (p productWithPrismaSupplierEqualsUniqueParam) supplierField() {}
+
+func (productWithPrismaSupplierEqualsUniqueParam) unique() {}
+func (productWithPrismaSupplierEqualsUniqueParam) equals() {}
 
 type ProductWithPrismaRecipeEqualsSetParam interface {
 	field() builder.Field
@@ -57050,6 +57948,7 @@ func (r productActions) CreateOne(
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
 	_qty ProductWithPrismaQtySetParam,
+	_supplier ProductWithPrismaSupplierSetParam,
 
 	optional ...ProductSetParam,
 ) productCreateOne {
@@ -57068,6 +57967,7 @@ func (r productActions) CreateOne(
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
 	fields = append(fields, _qty.field())
+	fields = append(fields, _supplier.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())
@@ -63782,6 +64682,560 @@ func (r supplierToSupplierOrdersDeleteMany) Exec(ctx context.Context) (*BatchRes
 }
 
 func (r supplierToSupplierOrdersDeleteMany) Tx() SupplierManyTxResult {
+	v := newSupplierManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type supplierToMainProductsFindUnique struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindUnique) with()             {}
+func (r supplierToMainProductsFindUnique) supplierModel()    {}
+func (r supplierToMainProductsFindUnique) supplierRelation() {}
+
+func (r supplierToMainProductsFindUnique) With(params ...ProductRelationWith) supplierToMainProductsFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r supplierToMainProductsFindUnique) Select(params ...supplierPrismaFields) supplierToMainProductsFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindUnique) Omit(params ...supplierPrismaFields) supplierToMainProductsFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range supplierOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindUnique) Exec(ctx context.Context) (
+	*SupplierModel,
+	error,
+) {
+	var v *SupplierModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r supplierToMainProductsFindUnique) ExecInner(ctx context.Context) (
+	*InnerSupplier,
+	error,
+) {
+	var v *InnerSupplier
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r supplierToMainProductsFindUnique) Update(params ...SupplierSetParam) supplierToMainProductsUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "Supplier"
+
+	var v supplierToMainProductsUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type supplierToMainProductsUpdateUnique struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsUpdateUnique) supplierModel() {}
+
+func (r supplierToMainProductsUpdateUnique) Exec(ctx context.Context) (*SupplierModel, error) {
+	var v SupplierModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r supplierToMainProductsUpdateUnique) Tx() SupplierUniqueTxResult {
+	v := newSupplierUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r supplierToMainProductsFindUnique) Delete() supplierToMainProductsDeleteUnique {
+	var v supplierToMainProductsDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "Supplier"
+
+	return v
+}
+
+type supplierToMainProductsDeleteUnique struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p supplierToMainProductsDeleteUnique) supplierModel() {}
+
+func (r supplierToMainProductsDeleteUnique) Exec(ctx context.Context) (*SupplierModel, error) {
+	var v SupplierModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r supplierToMainProductsDeleteUnique) Tx() SupplierUniqueTxResult {
+	v := newSupplierUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type supplierToMainProductsFindFirst struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindFirst) with()             {}
+func (r supplierToMainProductsFindFirst) supplierModel()    {}
+func (r supplierToMainProductsFindFirst) supplierRelation() {}
+
+func (r supplierToMainProductsFindFirst) With(params ...ProductRelationWith) supplierToMainProductsFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Select(params ...supplierPrismaFields) supplierToMainProductsFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Omit(params ...supplierPrismaFields) supplierToMainProductsFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range supplierOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) OrderBy(params ...ProductOrderByParam) supplierToMainProductsFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Skip(count int) supplierToMainProductsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Take(count int) supplierToMainProductsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Cursor(cursor SupplierCursorParam) supplierToMainProductsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindFirst) Exec(ctx context.Context) (
+	*SupplierModel,
+	error,
+) {
+	var v *SupplierModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r supplierToMainProductsFindFirst) ExecInner(ctx context.Context) (
+	*InnerSupplier,
+	error,
+) {
+	var v *InnerSupplier
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type supplierToMainProductsFindMany struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsFindMany) with()             {}
+func (r supplierToMainProductsFindMany) supplierModel()    {}
+func (r supplierToMainProductsFindMany) supplierRelation() {}
+
+func (r supplierToMainProductsFindMany) With(params ...ProductRelationWith) supplierToMainProductsFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Select(params ...supplierPrismaFields) supplierToMainProductsFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Omit(params ...supplierPrismaFields) supplierToMainProductsFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range supplierOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r supplierToMainProductsFindMany) OrderBy(params ...ProductOrderByParam) supplierToMainProductsFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Skip(count int) supplierToMainProductsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Take(count int) supplierToMainProductsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Cursor(cursor SupplierCursorParam) supplierToMainProductsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r supplierToMainProductsFindMany) Exec(ctx context.Context) (
+	[]SupplierModel,
+	error,
+) {
+	var v []SupplierModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r supplierToMainProductsFindMany) ExecInner(ctx context.Context) (
+	[]InnerSupplier,
+	error,
+) {
+	var v []InnerSupplier
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r supplierToMainProductsFindMany) Update(params ...SupplierSetParam) supplierToMainProductsUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "Supplier"
+
+	r.query.Outputs = countOutput
+
+	var v supplierToMainProductsUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type supplierToMainProductsUpdateMany struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r supplierToMainProductsUpdateMany) supplierModel() {}
+
+func (r supplierToMainProductsUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r supplierToMainProductsUpdateMany) Tx() SupplierManyTxResult {
+	v := newSupplierManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r supplierToMainProductsFindMany) Delete() supplierToMainProductsDeleteMany {
+	var v supplierToMainProductsDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "Supplier"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type supplierToMainProductsDeleteMany struct {
+	query builder.Query
+}
+
+func (r supplierToMainProductsDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p supplierToMainProductsDeleteMany) supplierModel() {}
+
+func (r supplierToMainProductsDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r supplierToMainProductsDeleteMany) Tx() SupplierManyTxResult {
 	v := newSupplierManyTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
@@ -72669,6 +74123,560 @@ func (r supplierProductDeleteMany) Exec(ctx context.Context) (*BatchResult, erro
 
 func (r supplierProductDeleteMany) Tx() SupplierProductManyTxResult {
 	v := newSupplierProductManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type productToSupplierFindUnique struct {
+	query builder.Query
+}
+
+func (r productToSupplierFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindUnique) with()            {}
+func (r productToSupplierFindUnique) productModel()    {}
+func (r productToSupplierFindUnique) productRelation() {}
+
+func (r productToSupplierFindUnique) With(params ...SupplierRelationWith) productToSupplierFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r productToSupplierFindUnique) Select(params ...productPrismaFields) productToSupplierFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindUnique) Omit(params ...productPrismaFields) productToSupplierFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range productOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindUnique) Exec(ctx context.Context) (
+	*ProductModel,
+	error,
+) {
+	var v *ProductModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r productToSupplierFindUnique) ExecInner(ctx context.Context) (
+	*InnerProduct,
+	error,
+) {
+	var v *InnerProduct
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r productToSupplierFindUnique) Update(params ...ProductSetParam) productToSupplierUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "Product"
+
+	var v productToSupplierUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type productToSupplierUpdateUnique struct {
+	query builder.Query
+}
+
+func (r productToSupplierUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierUpdateUnique) productModel() {}
+
+func (r productToSupplierUpdateUnique) Exec(ctx context.Context) (*ProductModel, error) {
+	var v ProductModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r productToSupplierUpdateUnique) Tx() ProductUniqueTxResult {
+	v := newProductUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r productToSupplierFindUnique) Delete() productToSupplierDeleteUnique {
+	var v productToSupplierDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "Product"
+
+	return v
+}
+
+type productToSupplierDeleteUnique struct {
+	query builder.Query
+}
+
+func (r productToSupplierDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p productToSupplierDeleteUnique) productModel() {}
+
+func (r productToSupplierDeleteUnique) Exec(ctx context.Context) (*ProductModel, error) {
+	var v ProductModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r productToSupplierDeleteUnique) Tx() ProductUniqueTxResult {
+	v := newProductUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type productToSupplierFindFirst struct {
+	query builder.Query
+}
+
+func (r productToSupplierFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindFirst) with()            {}
+func (r productToSupplierFindFirst) productModel()    {}
+func (r productToSupplierFindFirst) productRelation() {}
+
+func (r productToSupplierFindFirst) With(params ...SupplierRelationWith) productToSupplierFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r productToSupplierFindFirst) Select(params ...productPrismaFields) productToSupplierFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindFirst) Omit(params ...productPrismaFields) productToSupplierFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range productOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindFirst) OrderBy(params ...SupplierOrderByParam) productToSupplierFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r productToSupplierFindFirst) Skip(count int) productToSupplierFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r productToSupplierFindFirst) Take(count int) productToSupplierFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r productToSupplierFindFirst) Cursor(cursor ProductCursorParam) productToSupplierFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r productToSupplierFindFirst) Exec(ctx context.Context) (
+	*ProductModel,
+	error,
+) {
+	var v *ProductModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r productToSupplierFindFirst) ExecInner(ctx context.Context) (
+	*InnerProduct,
+	error,
+) {
+	var v *InnerProduct
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type productToSupplierFindMany struct {
+	query builder.Query
+}
+
+func (r productToSupplierFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierFindMany) with()            {}
+func (r productToSupplierFindMany) productModel()    {}
+func (r productToSupplierFindMany) productRelation() {}
+
+func (r productToSupplierFindMany) With(params ...SupplierRelationWith) productToSupplierFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r productToSupplierFindMany) Select(params ...productPrismaFields) productToSupplierFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindMany) Omit(params ...productPrismaFields) productToSupplierFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range productOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r productToSupplierFindMany) OrderBy(params ...SupplierOrderByParam) productToSupplierFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r productToSupplierFindMany) Skip(count int) productToSupplierFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r productToSupplierFindMany) Take(count int) productToSupplierFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r productToSupplierFindMany) Cursor(cursor ProductCursorParam) productToSupplierFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r productToSupplierFindMany) Exec(ctx context.Context) (
+	[]ProductModel,
+	error,
+) {
+	var v []ProductModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r productToSupplierFindMany) ExecInner(ctx context.Context) (
+	[]InnerProduct,
+	error,
+) {
+	var v []InnerProduct
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r productToSupplierFindMany) Update(params ...ProductSetParam) productToSupplierUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "Product"
+
+	r.query.Outputs = countOutput
+
+	var v productToSupplierUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type productToSupplierUpdateMany struct {
+	query builder.Query
+}
+
+func (r productToSupplierUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r productToSupplierUpdateMany) productModel() {}
+
+func (r productToSupplierUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r productToSupplierUpdateMany) Tx() ProductManyTxResult {
+	v := newProductManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r productToSupplierFindMany) Delete() productToSupplierDeleteMany {
+	var v productToSupplierDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "Product"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type productToSupplierDeleteMany struct {
+	query builder.Query
+}
+
+func (r productToSupplierDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p productToSupplierDeleteMany) productModel() {}
+
+func (r productToSupplierDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r productToSupplierDeleteMany) Tx() ProductManyTxResult {
+	v := newProductManyTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
 	return v
@@ -84055,6 +86063,7 @@ func (r productUpsertOne) Create(
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
 	_qty ProductWithPrismaQtySetParam,
+	_supplier ProductWithPrismaSupplierSetParam,
 
 	optional ...ProductSetParam,
 ) productUpsertOne {
@@ -84066,6 +86075,7 @@ func (r productUpsertOne) Create(
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
 	fields = append(fields, _qty.field())
+	fields = append(fields, _supplier.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())
@@ -84120,6 +86130,7 @@ func (r productUpsertOne) CreateOrUpdate(
 	_denom ProductWithPrismaDenomSetParam,
 	_price ProductWithPrismaPriceSetParam,
 	_qty ProductWithPrismaQtySetParam,
+	_supplier ProductWithPrismaSupplierSetParam,
 
 	optional ...ProductSetParam,
 ) productUpsertOne {
@@ -84131,6 +86142,7 @@ func (r productUpsertOne) CreateOrUpdate(
 	fields = append(fields, _denom.field())
 	fields = append(fields, _price.field())
 	fields = append(fields, _qty.field())
+	fields = append(fields, _supplier.field())
 
 	for _, q := range optional {
 		fields = append(fields, q.field())

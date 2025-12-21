@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid()) 
+  id            String    @id @default(uuid())
   
   role_id       String?   
   role          Role?     @relation(fields: [role_id], references: [id])
@@ -61,35 +61,39 @@ model ApiKey {
 }
 
 model Supplier {
-  id           String              @id @default(uuid())
-  name         String
-  code         String   @default("DEFAULT")
-  type         String
-  base_url     String?
-  status       Boolean             @default(true)
-  created_at   DateTime            @default(now())
-  updated_at   DateTime            @updatedAt
+  id             String            @id @default(uuid())
+  name           String
+  code           String            @default("DEFAULT")
+  type           String
+  base_url       String?
+  status         Boolean           @default(true)
+  created_at     DateTime          @default(now())
+  updated_at     DateTime          @updatedAt
   
-  products     InternalProduct[]   @relation("SupplierProducts")
-
+  // Relasi yang sudah ada
+  products       InternalProduct[] @relation("SupplierProducts")
   supplierProducts SupplierProduct[]
-  supplierOrders   SupplierOrder[]    
+  supplierOrders   SupplierOrder[]   
+
+  // === [BARU] Relasi ke Product Utama ===
+  // Dinamai 'MainProducts' agar tidak bentrok dengan 'products' di atas
+  MainProducts   Product[]
 
   @@map("supplier")
 }
 
 
 model InternalProduct {
-  id            String   @id @default(uuid())
-  supplier_id   String
-  name          String
-  denom         Int
-  price         Int
-  status        Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id             String   @id @default(uuid())
+  supplier_id    String
+  name           String
+  denom          Int
+  price          Int
+  status         Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
-  Supplier      Supplier @relation("SupplierProducts", fields: [supplier_id], references: [id])
+  Supplier       Supplier @relation("SupplierProducts", fields: [supplier_id], references: [id])
 
   @@map("internal_product")
 }
@@ -111,14 +115,14 @@ model Role {
 }
 
 model Permission {
-  id            String    @id @map("permission_id") @db.Char(100)
-  permissionKey String    @map("permission_key") @db.VarChar(100)
-  description   String?   @db.Text
+  id             String    @id @map("permission_id") @db.Char(100)
+  permissionKey  String    @map("permission_key") @db.VarChar(100)
+  description    String?   @db.Text
   
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
-  createdBy     String?   @map("created_by") @db.VarChar(255)
-  updatedAt     DateTime? @updatedAt @map("updated_at") @db.Timestamp(0)
-  updatedBy     String?   @map("updated_by") @db.VarChar(255)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  createdBy      String?   @map("created_by") @db.VarChar(255)
+  updatedAt      DateTime? @updatedAt @map("updated_at") @db.Timestamp(0)
+  updatedBy      String?   @map("updated_by") @db.VarChar(255)
 
   rolePermissions RolePermission[]
 
@@ -133,85 +137,92 @@ model RolePermission {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
   createdBy    String?  @map("created_by") @db.VarChar(255)
 
-  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@map("role_permission")
 }
 
 model SupplierProduct {
-  id           String   @id @default(uuid())
-  supplierProductID String @map("supplier_product_id")
-  price             Int    @default(0)
-  supplier_id  String
-  name         String
-  denom        Int
-  cost_price   Int
-  status       Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  supplierProductID   String   @map("supplier_product_id")
+  price               Int      @default(0)
+  supplier_id         String
+  name                String
+  denom               Int
+  cost_price          Int
+  status              Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
-  Supplier     Supplier @relation(fields: [supplier_id], references: [id])
+  Supplier            Supplier @relation(fields: [supplier_id], references: [id])
 
-  recipe       ProductRecipe[]
-  items        SupplierOrderItem[]
+  recipe              ProductRecipe[]
+  items               SupplierOrderItem[]
 
   @@map("supplier_product")
 }
 
 
 model Product {
-  id           String   @id @default(uuid())
-  name         String
-  denom        Int
-  price        Int
-  qty          Int
-  status       Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id          String   @id @default(uuid())
+  
+  // === [BARU] Field Supplier ID ===
+  supplier_id String
+  
+  name        String
+  denom       Int
+  price       Int
+  qty         Int
+  status      Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
-  recipe       ProductRecipe[]
-  orders       InternalOrder[]
+  // === [BARU] Relasi Supplier ===
+  Supplier    Supplier @relation(fields: [supplier_id], references: [id])
+
+  recipe      ProductRecipe[]
+  orders      InternalOrder[]
 
   @@map("product")
 }
 
 model ProductRecipe {
-  id                 String          @id @default(uuid())
-  product_id         String
+  id                  String   @id @default(uuid())
+  product_id          String
   supplier_product_id String
-  quantity           Int
+  quantity            Int
 
-  product            Product         @relation(fields: [product_id], references: [id])
-  supplierProduct    SupplierProduct @relation(fields: [supplier_product_id], references: [id])
+  product             Product         @relation(fields: [product_id], references: [id])
+  supplierProduct     SupplierProduct @relation(fields: [supplier_product_id], references: [id])
 
   @@map("product_recipe")
 }
 
 model InternalOrder {
-  id           String    @id @default(uuid())
-  product_id   String
-  buyer_uid    String
-  quantity     Int
-  status       String    @default("pending")
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  id          String   @id @default(uuid())
+  product_id  String
+  buyer_uid   String
+  quantity    Int
+  status      String   @default("pending")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
-  product      Product   @relation(fields: [product_id], references: [id])
+  product     Product  @relation(fields: [product_id], references: [id])
   supplierOrders SupplierOrder[]
 
   @@map("internal_order")
 }
 
 model SupplierOrder {
-  id               String             @id @default(uuid())
+  id                String    @id @default(uuid())
   internal_order_id String
   supplier_id       String
-  status            String            @default("pending")
-  attempt           Int               @default(0)
+  status            String    @default("pending")
+  attempt           Int       @default(0)
   last_error        String?
-  created_at        DateTime          @default(now())
-  updated_at        DateTime          @updatedAt
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
 
   internalOrder     InternalOrder     @relation(fields: [internal_order_id], references: [id])
   Supplier          Supplier          @relation(fields: [supplier_id], references: [id])
@@ -222,15 +233,15 @@ model SupplierOrder {
 
 
 model SupplierOrderItem {
-  id                 String           @id @default(uuid())
-  supplier_order_id  String
+  id                  String   @id @default(uuid())
+  supplier_order_id   String
   supplier_product_id String
-  quantity           Int
-  created_at         DateTime         @default(now())
-  updated_at         DateTime         @updatedAt
+  quantity            Int
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
-  supplierOrder      SupplierOrder    @relation(fields: [supplier_order_id], references: [id])
-  supplierProduct    SupplierProduct  @relation(fields: [supplier_product_id], references: [id])
+  supplierOrder       SupplierOrder   @relation(fields: [supplier_order_id], references: [id])
+  supplierProduct     SupplierProduct @relation(fields: [supplier_product_id], references: [id])
 
   @@map("supplier_order_item")
 }

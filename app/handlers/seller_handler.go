@@ -27,7 +27,11 @@ func NewSellerHandler(dbClient *db.PrismaClient, orderService *services.OrderSer
 }
 
 func (h *SellerHandler) SellerProducts(c echo.Context) error {
-	products, err := h.DB.Product.FindMany().Exec(c.Request().Context())
+	// [FIX] Tambahkan .With(db.Product.Supplier.Fetch())
+	products, err := h.DB.Product.FindMany().With(
+		db.Product.Supplier.Fetch(), 
+	).Exec(c.Request().Context())
+	
 	if err != nil {
 		return c.JSON(500, echo.Map{"error": err.Error()})
 	}

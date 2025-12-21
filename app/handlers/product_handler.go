@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"gerbangapi/prisma/db"
+	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -15,194 +15,162 @@ func NewProductHandler(dbClient *db.PrismaClient) *ProductHandler {
 	return &ProductHandler{DB: dbClient}
 }
 
-// Struct Helper
-type RecipeInput struct {
-	SupplierProductID string `json:"supplier_product_id"`
-	Quantity          int    `json:"quantity"`
-}
-
-type ProductMixReq struct {
-	Name    string        `json:"name"`
-	Denom   int           `json:"denom"`
-	Price   int           `json:"price"`
-	Qty     int           `json:"qty"`
-	Status  bool          `json:"status"`
-	Recipes []RecipeInput `json:"recipes"`
+// ==========================================
+// STRUCT REQUEST (Murni Product Saja)
+// ==========================================
+type ProductRequest struct {
+	Name       string `json:"name"`
+	Denom      int    `json:"denom"`
+	Price      int    `json:"price"`
+	Qty        int    `json:"qty"`
+	Status     bool   `json:"status"`
+	SupplierID string `json:"supplier_id"` // Wajib Link ke Supplier
 }
 
 // ==========================================
-// 1. CREATE (Batch Transaction + Manual UUID)
+// 1. CREATE (POST /products)
 // ==========================================
 func (h *ProductHandler) Create(c echo.Context) error {
-	req := new(ProductMixReq)
+	req := new(ProductRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "Invalid JSON request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid JSON format"})
 	}
 
-	if len(req.Recipes) == 0 {
-		return c.JSON(400, echo.Map{"error": "Minimal harus ada 1 recipe/bahan"})
+	// Validasi Input
+	if req.SupplierID == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "supplier_id wajib diisi"})
+	}
+	if req.Name == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "name wajib diisi"})
 	}
 
 	ctx := c.Request().Context()
 
-	// 1. GENERATE UUID MANUAL
-	// Agar kita bisa pakai ID ini untuk Product DAN Recipe di satu batch yang sama
-	newProductID := uuid.New().String()
-
+	// Default Qty
 	finalQty := req.Qty
-	if finalQty <= 0 { finalQty = 1 }
+	if finalQty <= 0 {
+		finalQty = 1
+	}
 
-	// 2. SIAPKAN TRANSAKSI (Batch)
-	// Gunakan interface db.PrismaTransaction
-	var ops []db.PrismaTransaction 
-
-	// A. Operasi Create Product
-	opProduct := h.DB.Product.CreateOne(
-		db.Product.ID.Set(newProductID), // Set ID Manual
+	// Eksekusi Create (Tanpa Transaction, karena single table)
+	product, err := h.DB.Product.CreateOne(
 		db.Product.Name.Set(req.Name),
 		db.Product.Denom.Set(req.Denom),
 		db.Product.Price.Set(req.Price),
 		db.Product.Qty.Set(finalQty),
 		db.Product.Status.Set(req.Status),
-	).Tx() // Gunakan .Tx() agar jadi operasi transaksi
+		db.Product.Supplier.Link(
+			db.Supplier.ID.Equals(req.SupplierID),
+		),
+	).Exec(ctx)
 
-	ops = append(ops, opProduct)
-
-	// B. Operasi Create Recipes (Looping)
-	for _, r := range req.Recipes {
-		opRecipe := h.DB.ProductRecipe.CreateOne(
-			db.ProductRecipe.Quantity.Set(r.Quantity),
-			db.ProductRecipe.Product.Link(
-				db.Product.ID.Equals(newProductID), // Link ke ID yang kita buat diatas
-			),
-			db.ProductRecipe.SupplierProduct.Link(
-				db.SupplierProduct.ID.Equals(r.SupplierProductID),
-			),
-		).Tx()
-		
-		ops = append(ops, opRecipe)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal membuat product: " + err.Error()})
 	}
 
-	// 3. EKSEKUSI TRANSAKSI
-	if err := h.DB.Prisma.Transaction(ops...).Exec(ctx); err != nil {
-		return c.JSON(500, echo.Map{"error": "Gagal menyimpan produk: " + err.Error()})
-	}
-
-	return c.JSON(201, echo.Map{
-		"message": "Product & Recipes created successfully",
-		"id":      newProductID,
+	return c.JSON(http.StatusCreated, echo.Map{
+		"message": "Product created successfully",
+		"data":    product,
 	})
 }
 
 // ==========================================
-// 2. READ ALL
+// 2. GET ALL & BY ID (GET /products?id=...)
 // ==========================================
 func (h *ProductHandler) GetAll(c echo.Context) error {
+	ctx := c.Request().Context()
+	id := c.QueryParam("id")
+
+	// A. GET DETAIL
+	if id != "" {
+		product, err := h.DB.Product.FindUnique(
+			db.Product.ID.Equals(id),
+		).With(
+			db.Product.Supplier.Fetch(), // Tetap ambil info supplier
+		).Exec(ctx)
+
+		if err != nil {
+			return c.JSON(http.StatusNotFound, echo.Map{"error": "Product not found"})
+		}
+		return c.JSON(http.StatusOK, echo.Map{"data": product})
+	}
+
+	// B. GET LIST
 	products, err := h.DB.Product.FindMany().With(
-		db.Product.Recipe.Fetch().With(
-			db.ProductRecipe.SupplierProduct.Fetch(),
-		),
-	).Exec(c.Request().Context())
+		db.Product.Supplier.Fetch(),
+	).Exec(ctx)
 
 	if err != nil {
-		return c.JSON(500, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
-	return c.JSON(200, echo.Map{"data": products})
+
+	return c.JSON(http.StatusOK, echo.Map{"data": products})
 }
 
 // ==========================================
-// 3. GET BY ID
-// ==========================================
-func (h *ProductHandler) GetByID(c echo.Context) error {
-	id := c.Param("id")
-
-	product, err := h.DB.Product.FindUnique(
-		db.Product.ID.Equals(id),
-	).With(
-		db.Product.Recipe.Fetch().With(
-			db.ProductRecipe.SupplierProduct.Fetch(),
-		),
-	).Exec(c.Request().Context())
-
-	if err != nil {
-		return c.JSON(404, echo.Map{"error": "Product not found"})
-	}
-	return c.JSON(200, echo.Map{"data": product})
-}
-
-// ==========================================
-// 4. UPDATE (Batch Transaction)
+// 3. UPDATE (PUT /products?id=...)
 // ==========================================
 func (h *ProductHandler) Update(c echo.Context) error {
-	id := c.Param("id")
-	req := new(ProductMixReq)
+	id := c.QueryParam("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Query param 'id' required"})
+	}
+
+	req := new(ProductRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 	}
 
 	ctx := c.Request().Context()
-	
-	// Gunakan interface db.PrismaTransaction
-	var ops []db.PrismaTransaction
-
-	// A. Update Produk
 	var updates []db.ProductSetParam
-	if req.Name != "" { updates = append(updates, db.Product.Name.Set(req.Name)) }
-	if req.Price > 0 { updates = append(updates, db.Product.Price.Set(req.Price)) }
-	if req.Denom > 0 { updates = append(updates, db.Product.Denom.Set(req.Denom)) }
-	// Selalu update status sesuai kiriman
+
+	if req.Name != "" {
+		updates = append(updates, db.Product.Name.Set(req.Name))
+	}
+	if req.Denom > 0 {
+		updates = append(updates, db.Product.Denom.Set(req.Denom))
+	}
+	if req.Price > 0 {
+		updates = append(updates, db.Product.Price.Set(req.Price))
+	}
+	
 	updates = append(updates, db.Product.Status.Set(req.Status))
+	updates = append(updates, db.Product.Qty.Set(req.Qty))
 
-	opUpdateProd := h.DB.Product.FindUnique(db.Product.ID.Equals(id)).Update(updates...).Tx()
-	ops = append(ops, opUpdateProd)
-
-	// B. Update Resep (Wipe & Replace)
-	if len(req.Recipes) > 0 {
-		// 1. Hapus Resep Lama
-		opDeleteOld := h.DB.ProductRecipe.FindMany(
-			db.ProductRecipe.ProductID.Equals(id),
-		).Delete().Tx()
-		ops = append(ops, opDeleteOld)
-
-		// 2. Buat Resep Baru
-		for _, r := range req.Recipes {
-			opNewRecipe := h.DB.ProductRecipe.CreateOne(
-				db.ProductRecipe.Quantity.Set(r.Quantity),
-				db.ProductRecipe.Product.Link(db.Product.ID.Equals(id)),
-				db.ProductRecipe.SupplierProduct.Link(db.SupplierProduct.ID.Equals(r.SupplierProductID)),
-			).Tx()
-			ops = append(ops, opNewRecipe)
-		}
+	if req.SupplierID != "" {
+		updates = append(updates, db.Product.Supplier.Link(db.Supplier.ID.Equals(req.SupplierID)))
 	}
 
-	// Eksekusi Batch
-	if err := h.DB.Prisma.Transaction(ops...).Exec(ctx); err != nil {
-		return c.JSON(500, echo.Map{"error": "Gagal update produk: " + err.Error()})
+	updatedProduct, err := h.DB.Product.FindUnique(
+		db.Product.ID.Equals(id),
+	).Update(updates...).Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal update: " + err.Error()})
 	}
 
-	return c.JSON(200, echo.Map{"message": "Product updated successfully"})
+	return c.JSON(http.StatusOK, echo.Map{"message": "Updated", "data": updatedProduct})
 }
 
 // ==========================================
-// 5. DELETE (Batch Transaction)
+// 4. DELETE (DELETE /products?id=...)
 // ==========================================
 func (h *ProductHandler) Delete(c echo.Context) error {
-	id := c.Param("id")
-	ctx := c.Request().Context()
-
-	var ops []db.PrismaTransaction
-
-	// 1. Hapus Resep (Child)
-	opDeleteRecipe := h.DB.ProductRecipe.FindMany(db.ProductRecipe.ProductID.Equals(id)).Delete().Tx()
-	ops = append(ops, opDeleteRecipe)
-	
-	// 2. Hapus Produk (Parent)
-	opDeleteProd := h.DB.Product.FindUnique(db.Product.ID.Equals(id)).Delete().Tx()
-	ops = append(ops, opDeleteProd)
-
-	if err := h.DB.Prisma.Transaction(ops...).Exec(ctx); err != nil {
-		return c.JSON(500, echo.Map{"error": "Gagal delete: " + err.Error()})
+	id := c.QueryParam("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Query param 'id' required"})
 	}
 
-	return c.JSON(200, echo.Map{"message": "Deleted successfully"})
+	ctx := c.Request().Context()
+	
+	// Hapus Product langsung (Tanpa hapus recipe manual, pastikan DB support cascade atau recipe kosong)
+	_, err := h.DB.Product.FindUnique(
+		db.Product.ID.Equals(id),
+	).Delete().Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal delete: " + err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{"message": "Deleted"})
 }
