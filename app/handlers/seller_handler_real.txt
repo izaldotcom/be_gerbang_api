@@ -44,7 +44,7 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 	})
 }
 
-func (h *SellerHandler) SellerOrderOld(c echo.Context) error {
+func (h *SellerHandler) SellerOrder(c echo.Context) error {
 
 	type Req struct {
 		ProductID   string `json:"product_id"`
@@ -193,84 +193,5 @@ func (h *SellerHandler) SellerOrderOld(c echo.Context) error {
 		"product":     product.Name,
 		"supplier_id": req.SupplierID,
 		"trx_ids":     finalTrxString,
-	})
-}
-
-func (h *SellerHandler) SellerOrder(c echo.Context) error {
-	type Req struct {
-		ProductID   string `json:"product_id"`
-		Destination string `json:"destination"`
-		RefID       string `json:"ref_id"`
-		SupplierID  string `json:"supplier_id"`
-		// Opsional: Jika seller ingin mengirim URL webhook dinamis
-		WebhookURL  string `json:"webhook_url"` 
-	}
-
-	req := new(Req)
-	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "Invalid request"})
-	}
-
-	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
-		return c.JSON(400, echo.Map{"error": "product_id, destination, dan supplier_id required"})
-	}
-
-	ctx := c.Request().Context()
-
-	// 1) VALIDASI PRODUCT (TETAP SAMA)
-	product, err := h.DB.Product.FindUnique(
-		db.Product.ID.Equals(req.ProductID),
-	).Exec(ctx)
-
-	if err != nil {
-		// Fallback search by name
-		product, err = h.DB.Product.FindFirst(
-			db.Product.Name.Contains(req.ProductID),
-		).Exec(ctx)
-		if err != nil {
-			return c.JSON(404, echo.Map{"error": "Product tidak ditemukan."})
-		}
-	}
-	realProductUUID := product.ID
-
-	// [BARU] Ambil User ID dari Context (diset oleh Middleware Security)
-	userID := c.Get("user_id").(string)
-
-	// 2) INSERT INTERNAL ORDER (Status Awal: Pending)
-	internalOrderID := uuid.New().String()
-    _, err = h.DB.Prisma.ExecuteRaw(
-        `INSERT INTO internal_order 
-            (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
-        internalOrderID, realProductUUID, userID, req.Destination, 1, // <--- Tambah userID di sini
-    ).Exec(ctx)
-
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Database error: " + err.Error()})
-	}
-
-	// 3) MIXING PROCESS (Memecah menjadi Supplier Order)
-	// Fungsi ini akan membuat row di tabel supplier_order dengan status 'pending'
-	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
-
-	if mixErr != nil {
-		// Update failed jika mixing gagal
-		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
-		return c.JSON(400, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
-	}
-
-	// ======================================================
-	// 4) RESPONSE CEPAT (ASYNCHRONOUS)
-	// ======================================================
-	// Kita tidak melakukan scraping di sini. Worker akan mengambil job berdasarkan status 'pending'.
-	
-	log.Printf("✅ Order Accepted: %s -> Masuk Antrian Worker", internalOrderID)
-
-	return c.JSON(http.StatusAccepted, echo.Map{
-		"status":      "pending",
-		"message":     "Order accepted and queued for processing",
-		"order_id":    internalOrderID, // ID Internal
-		"supplier_order_id": supplierOrder.ID, // ID untuk tracking worker
-		"estimated_time": "1-2 minutes",
 	})
 }

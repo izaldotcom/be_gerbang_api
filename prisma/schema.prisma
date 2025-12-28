@@ -26,6 +26,7 @@ model User {
 
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
+  internalOrders InternalOrder[]
 
   @@map("user")
 }
@@ -204,6 +205,11 @@ model InternalOrder {
   product_id  String
   buyer_uid   String
   quantity    Int
+  
+  // [BARU] Tambahkan ini
+  user_id     String?  // Pakai ? dulu agar data lama tidak error
+  user        User?    @relation(fields: [user_id], references: [id])
+
   status      String   @default("pending")
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt

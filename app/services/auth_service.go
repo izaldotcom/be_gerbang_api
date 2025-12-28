@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"gerbangapi/app/utils"
@@ -43,6 +44,7 @@ type UserSession struct {
 	RoleID   string `json:"role_id"`
 	RoleName string `json:"role_name"`
 	Status   string `json:"status"`
+	ApiKey   string `json:"api_key"`
 }
 
 type JwtClaims struct {
@@ -75,51 +77,74 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	}
 	hashed, _ := utils.HashPassword(input.Password)
 
-	// Slice untuk field OPSIONAL saja (ID, Phone, Role, Status)
 	var ops []db.UserSetParam
 
-	// 1. ID (Optional karena di schema ada @default(uuid()), tapi kita set manual)
 	ops = append(ops, db.User.ID.Set(input.ID))
-
-	// 2. Phone (Optional)
 	if input.Phone != "" {
 		ops = append(ops, db.User.Phone.Set(input.Phone))
 	}
-
-	// 3. RoleID (Optional / Nullable)
 	if input.RoleID != "" {
 		ops = append(ops, db.User.RoleID.Set(input.RoleID))
 	}
-
-	// 4. Status (Optional / Nullable)
 	if input.Status != "" {
 		ops = append(ops, db.User.Status.Set(input.Status))
 	} else {
-		ops = append(ops, db.User.Status.Set("active")) // Default status
+		ops = append(ops, db.User.Status.Set("active"))
 	}
 
-	// EKSEKUSI CREATE
-	// Masukkan Field Wajib (Name, Email, Password) sebagai argumen terpisah di awal
-	_, err := s.DB.User.CreateOne(
-		db.User.Name.Set(input.Name),      // Argumen 1: Name (Wajib)
-		db.User.Email.Set(input.Email),    // Argumen 2: Email (Wajib)
-		db.User.Password.Set(hashed),      // Argumen 3: Password (Wajib)
-		ops...,                            // Sisanya (Optional) via slice
+	userCreated, err := s.DB.User.CreateOne(
+		db.User.Name.Set(input.Name),
+		db.User.Email.Set(input.Email),
+		db.User.Password.Set(hashed),
+		ops...,
 	).Exec(ctx)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// AUTO-GENERATE API KEY
+	if input.RoleID != "" {
+		roleData, err := s.DB.Role.FindUnique(
+			db.Role.ID.Equals(input.RoleID),
+		).Exec(ctx)
+
+		if err == nil && roleData != nil && strings.EqualFold(roleData.Name, "Customer") {
+			generatedKey := "MH-" + uuid.New().String()
+			generatedSecret := uuid.New().String()
+
+			// Perbaikan: db.APIKey (Huruf Besar API)
+			_, errKey := s.DB.APIKey.CreateOne(
+				db.APIKey.APIKey.Set(generatedKey),
+				db.APIKey.Secret.Set(generatedSecret),
+				db.APIKey.User.Link(
+					db.User.ID.Equals(userCreated.ID),
+				),
+				db.APIKey.IsActive.Set(true),
+				db.APIKey.SellerName.Set(input.Name),
+				db.APIKey.Status.Set(true),
+			).Exec(ctx)
+
+			if errKey != nil {
+				return errKey
+			}
+		}
+	}
+
+	return nil
 }
 
-// 2. LOGIN
+// 2. LOGIN (UPDATED FIX)
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenResponse, error) {
-	// A. Cari User (Email OR Phone) + Include Role
+	// A. Cari User + Join Role & APIKeys
 	user, err := s.DB.User.FindFirst(
 		db.User.Or(
 			db.User.Email.Equals(input.Identifier),
 			db.User.Phone.Equals(input.Identifier),
 		),
 	).With(
-		db.User.Role.Fetch(), // Join tabel Role
+		db.User.Role.Fetch(),
+		db.User.APIKeys.Fetch(), // [FIX] Gunakan APIKeys (Huruf Besar API)
 	).Exec(ctx)
 
 	if err != nil {
@@ -134,13 +159,12 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		return nil, errors.New("invalid password")
 	}
 
-	// C. Generate Access Token
+	// C. Generate Token
 	accessToken, err := s.generateAccessToken(user.ID, user.Email)
 	if err != nil {
 		return nil, err
 	}
 
-	// D. Generate Refresh Token
 	refreshTokenStr := uuid.New().String()
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 
@@ -155,8 +179,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		return nil, err
 	}
 
-	// E. Persiapkan Data Session untuk Redis
-	// Gunakan Accessor Method (v, ok) untuk field optional
+	// D. Data Session
 	phoneVal := ""
 	if v, ok := user.Phone(); ok { phoneVal = v }
 
@@ -166,10 +189,19 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	statusVal := ""
 	if v, ok := user.Status(); ok { statusVal = v }
 
-	// Ambil Role Name dari Relasi
 	roleNameVal := ""
-	if roleData, ok := user.Role(); ok {
-		roleNameVal = roleData.Name
+	if roleData, ok := user.Role(); ok { roleNameVal = roleData.Name }
+
+	// [FIX] Ambil API Key (Gunakan APIKeys)
+	userApiKey := ""
+	// Perhatikan method ini juga huruf besar: user.APIKeys()
+	if apiKeys := user.APIKeys(); len(apiKeys) > 0 {
+		for _, key := range apiKeys {
+			if key.IsActive {
+				userApiKey = key.APIKey
+				break
+			}
+		}
 	}
 
 	userSession := UserSession{
@@ -180,14 +212,14 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		RoleID:   roleVal,
 		RoleName: roleNameVal,
 		Status:   statusVal,
+		ApiKey:   userApiKey, // Disimpan ke Session
 	}
 
 	jsonData, _ := json.Marshal(userSession)
 
-	// F. Simpan ke Redis (24 jam)
+	// E. Simpan ke Redis
 	redisKey := "user_session:" + user.ID
 	err = s.Redis.Set(ctx, redisKey, jsonData, 24*time.Hour).Err()
-	// Kita abaikan error redis agar login tetap jalan (opsional bisa di-log)
 
 	return &TokenResponse{
 		AccessToken:  accessToken,
@@ -221,10 +253,10 @@ func (s *AuthService) RefreshTokenProcess(ctx context.Context, refreshTokenInput
 // 4. GET SESSION FROM REDIS
 func (s *AuthService) GetSession(ctx context.Context, userID string) (*UserSession, error) {
 	redisKey := "user_session:" + userID
-	
+
 	val, err := s.Redis.Get(ctx, redisKey).Result()
 	if err != nil {
-		return nil, err // Key not found / expired
+		return nil, err
 	}
 
 	var session UserSession

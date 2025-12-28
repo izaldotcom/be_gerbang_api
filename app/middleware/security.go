@@ -8,19 +8,20 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SellerSecurityMiddleware: HANYA Cek API Key (Tanpa Signature)
+// SellerSecurityMiddleware: Cek API Key
 func SellerSecurityMiddleware(client *db.PrismaClient) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// 1. Ambil Header X-API-KEY saja
+			// 1. Ambil Header X-API-KEY
 			apiKey := c.Request().Header.Get("X-API-KEY")
 
 			if apiKey == "" {
 				return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Missing X-API-KEY header"})
 			}
 
-			// 2. Cek ke Database (Apakah key valid?)
-			// Gunakan context.Background() agar query tidak batal jika request client putus
+			// 2. Cek ke Database
+			// Perbaikan: Gunakan 'client.ApiKey' (Sesuai nama model di schema.prisma)
+			// Field: 'db.ApiKey.APIKey' (Biasanya Prisma Go mengkapitalisasi acronym)
 			keyData, err := client.APIKey.FindUnique(
 				db.APIKey.APIKey.Equals(apiKey),
 			).Exec(context.Background())
@@ -34,8 +35,9 @@ func SellerSecurityMiddleware(client *db.PrismaClient) echo.MiddlewareFunc {
 				return c.JSON(http.StatusForbidden, echo.Map{"error": "API Key is inactive"})
 			}
 
-			// 4. Sukses: Simpan ID seller ke context agar bisa dipakai di Handler
-			c.Set("seller_id", keyData.UserID)
+			// 4. Sukses: Simpan User ID ke context
+			// [PENTING] String ini harus "user_id" agar cocok dengan Handler (c.Get("user_id"))
+			c.Set("user_id", keyData.UserID)
 			
 			// Lanjut ke endpoint berikutnya
 			return next(c)

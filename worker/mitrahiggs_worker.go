@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -12,14 +15,13 @@ import (
 	"gerbangapi/prisma/db"
 
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9" // [BARU] Import Redis
+	"github.com/redis/go-redis/v9"
 )
 
-// Gunakan context background untuk proses worker yang berjalan terus menerus
 var ctx = context.Background()
 
 func main() {
-	// Load env agar bisa baca MH_USERNAME/PASSWORD
+	// 1. Load Env
 	if err := godotenv.Load(".env"); err != nil {
 		if err2 := godotenv.Load("../.env"); err2 != nil {
 			log.Println("⚠️  Warning: .env file not found. Menggunakan System Env.")
@@ -28,14 +30,14 @@ func main() {
 
 	log.Println("🚀 Starting MitraHiggs Order Worker...")
 
-	// 1. Inisialisasi DB Client
+	// 2. Connect Database
 	dbClient := db.NewClient()
 	if err := dbClient.Prisma.Connect(); err != nil {
-		log.Fatalf("Fatal Error: Failed to connect to database: %v", err)
+		log.Fatalf("❌ Fatal Error: Failed to connect to database: %v", err)
 	}
 	defer dbClient.Prisma.Disconnect()
 
-	// 2. [BARU] Inisialisasi Redis Client secara manual (Sama seperti di main.go)
+	// 3. Connect Redis (Tetap dibutuhkan untuk Scraper Session)
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
@@ -43,8 +45,8 @@ func main() {
 
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Password: "",
+		DB:       0,
 	})
 
 	// Cek koneksi Redis
@@ -54,25 +56,36 @@ func main() {
 		log.Println("✅ Database & Redis Connected. Worker is running...")
 	}
 
-	// Worker akan berputar terus menerus
+	// 4. Infinite Loop Worker
 	for {
-		// [UPDATE] Kirim redisClient ke fungsi process
 		err := processNextSupplierOrder(dbClient, redisClient)
 		if err != nil {
 			log.Printf("❌ Worker Error: %v", err)
 		}
 
-		// Jeda sebelum mengecek antrian lagi (misalnya 5 detik)
+		// Jeda 5 detik sebelum mengecek antrian lagi
 		time.Sleep(5 * time.Second)
 	}
 }
 
-// [UPDATE] Terima parameter redisClient
 func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Client) error {
-	// A. Ambil order 'pending' pertama
+	// =================================================================
+	// LANGKAH A: Cari Supplier UUID berdasarkan CODE 'MH_OFFICIAL'
+	// =================================================================
+	supplierMH, err := dbClient.Supplier.FindFirst(
+		db.Supplier.Code.Equals("MH_OFFICIAL"),
+	).Exec(ctx)
+
+	if err != nil {
+		return fmt.Errorf("Supplier 'MH_OFFICIAL' tidak ditemukan di Database")
+	}
+
+	// =================================================================
+	// LANGKAH B: Cari Order Pending
+	// =================================================================
 	supplierOrder, err := dbClient.SupplierOrder.FindFirst(
 		db.SupplierOrder.Status.Equals("pending"),
-		db.SupplierOrder.SupplierID.Equals("mitra-higgs"),
+		db.SupplierOrder.SupplierID.Equals(supplierMH.ID),
 	).Exec(ctx)
 
 	if err != nil {
@@ -85,78 +98,44 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	orderID := supplierOrder.ID
 	log.Printf("🔥 Processing Order #%s", orderID)
 
-	// B. Tandai order sebagai 'processing'
-	_, err = dbClient.Prisma.ExecuteRaw(
-		"UPDATE supplier_order SET status='processing' WHERE id=?",
-		orderID,
+	// Update status -> processing
+	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='processing' WHERE id=?", orderID).Exec(ctx)
+
+	// =================================================================
+	// LANGKAH C: Ambil Data Lengkap (Internal Order)
+	// =================================================================
+	
+	// Fetch InternalOrder beserta Relasi Product
+	internalOrder, err := dbClient.InternalOrder.FindUnique(
+		db.InternalOrder.ID.Equals(supplierOrder.InternalOrderID),
+	).With(
+		db.InternalOrder.Product.Fetch(), 
 	).Exec(ctx)
 
 	if err != nil {
-		return fmt.Errorf("failed to mark order as processing: %v", err)
-	}
-
-	// C. Panggil Scraper (Core Logic)
-	// [UPDATE] Pass redisClient ke fungsi eksekusi
-	err = executeScrapingOrder(dbClient, supplierOrder, redisClient)
-
-	// D. Handle Hasil (Success/Fail)
-	if err != nil {
-		log.Printf("⚠️ Order #%s FAILED: %v", orderID, err)
-
-		errMsg := err.Error()
-		dbClient.Prisma.ExecuteRaw(
-			"UPDATE supplier_order SET status='failed', last_error=? WHERE id=?",
-			errMsg,
-			orderID,
-		).Exec(ctx)
-
-		dbClient.Prisma.ExecuteRaw(
-			"UPDATE internal_order SET status='failed' WHERE id=?",
-			supplierOrder.InternalOrderID,
-		).Exec(ctx)
-
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Internal Order Not Found")
 		return nil
 	}
 
-	log.Printf("✅ Order #%s Success!", orderID)
-
-	dbClient.Prisma.ExecuteRaw(
-		"UPDATE supplier_order SET status='success' WHERE id=?",
-		orderID,
-	).Exec(ctx)
-
-	dbClient.Prisma.ExecuteRaw(
-		"UPDATE internal_order SET status='success' WHERE id=?",
-		supplierOrder.InternalOrderID,
-	).Exec(ctx)
-
-	return nil
-}
-
-// [UPDATE] Terima parameter redisClient
-func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierOrderModel, redisClient *redis.Client) error {
-
-	// 1. Ambil Item & Quantity
+	// Ambil Item Detail
 	var items []map[string]interface{}
-	queryExec := dbClient.Prisma.QueryRaw(
+	dbClient.Prisma.QueryRaw(
 		`SELECT sp.supplier_product_id, soi.quantity 
 		 FROM supplier_order_item soi
 		 JOIN supplier_product sp ON soi.supplier_product_id = sp.id
 		 WHERE soi.supplier_order_id = ? 
 		 LIMIT 1`,
 		supplierOrder.ID,
-	)
+	).Exec(ctx, &items)
 
-	queryErr := queryExec.Exec(ctx, &items)
-	if queryErr != nil {
-		return fmt.Errorf("failed to query supplier order item: %v", queryErr)
-	}
 	if len(items) == 0 {
-		return errors.New("no supplier product item found for this order")
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "No items found for this order")
+		return nil
 	}
 
 	productHTMLID := items[0]["supplier_product_id"].(string)
-
+	
+	// Parse Quantity
 	var repeatCount int
 	if qtyFloat, ok := items[0]["quantity"].(float64); ok {
 		repeatCount = int(qtyFloat)
@@ -166,57 +145,135 @@ func executeScrapingOrder(dbClient *db.PrismaClient, supplierOrder *db.SupplierO
 		repeatCount = 1
 	}
 
-	// 2. Ambil Buyer UID
-	internalOrder, err := dbClient.InternalOrder.FindUnique(
-		db.InternalOrder.ID.Equals(supplierOrder.InternalOrderID),
-	).Exec(ctx)
-
-	if err != nil || internalOrder == nil {
-		return errors.New("internal order not found or error fetching it")
-	}
-
-	playerID := internalOrder.BuyerUID
-
-	// 3. Inisialisasi Scraper Service
-	// [FIX] Inject redisClient di sini
+	// =================================================================
+	// LANGKAH D: Eksekusi Scraping (Browser)
+	// =================================================================
+	
+	// Gunakan FALSE (Headful) agar browser terlihat dan lebih stabil
 	svc, err := scraper.NewMitraHiggsService(false, redisClient)
 	if err != nil {
-		return fmt.Errorf("browser init failed: %v", err)
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Browser Init Failed: "+err.Error())
+		return nil
 	}
 	defer svc.Close()
 
-	// 4. Login
-	log.Printf("   -> Logging in with MH_USERNAME...")
+	// Jeda waktu agar halaman loading sempurna
+	log.Println("⏳ Waiting for browser page load...")
+	time.Sleep(5 * time.Second) 
+
+	// Login
 	mhUsername := os.Getenv("MH_USERNAME")
 	mhPassword := os.Getenv("MH_PASSWORD")
 
-	if mhUsername == "" || mhPassword == "" {
-		return errors.New("MH_USERNAME or MH_PASSWORD environment variable not set")
-	}
-
+	log.Println("🔑 Logging in...")
 	if err := svc.Login(mhUsername, mhPassword); err != nil {
-		return fmt.Errorf("provider login failed: %v", err)
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Login Failed: "+err.Error())
+		return nil
 	}
 
-	// 5. Place Order
-	log.Printf("   -> Placing order for Player: %s, ItemID: %s, Qty: %d", playerID, productHTMLID, repeatCount)
-
-	trxIDs, err := svc.PlaceOrder(playerID, productHTMLID, repeatCount)
+	// Place Order
+	log.Printf("🛒 Placing order for Player: %s, Item: %s", internalOrder.BuyerUID, productHTMLID)
+	trxIDs, err := svc.PlaceOrder(internalOrder.BuyerUID, productHTMLID, repeatCount)
 
 	if err != nil {
-		return fmt.Errorf("mitrahiggs place order failed: %v", err)
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Place Order Failed: "+err.Error())
+		return nil
 	}
 
-	// 6. Simpan provider_trx_id
-	_, err = dbClient.Prisma.ExecuteRaw(
-		"UPDATE supplier_order SET provider_trx_id=? WHERE id=?",
-		trxIDs,
-		supplierOrder.ID,
-	).Exec(ctx)
+	// =================================================================
+	// LANGKAH E: Sukses & Notifikasi
+	// =================================================================
+	log.Printf("✅ Order #%s Success! Trx: %v", orderID, trxIDs)
 
-	if err != nil {
-		log.Printf("   -> WARNING: Failed to save provider_trx_id %s: %v", trxIDs, err)
+	// Update DB Success
+	providerTrx := trxIDs[0]
+	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success', provider_trx_id=? WHERE id=?", providerTrx, orderID).Exec(ctx)
+	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", supplierOrder.InternalOrderID).Exec(ctx)
+
+	// --- Siapkan Data Notifikasi ---
+	
+	productName := internalOrder.Product().Name
+	
+	// 'tujuan' berisi ID Player/Game (User ID Frontend)
+	tujuan := internalOrder.BuyerUID 
+	
+	supplierName := supplierMH.Name
+	tanggal := time.Now().Format("02 Jan 2006 15:04:05")
+
+	// Format Pesan HTML Telegram (Sesuai Permintaan)
+	// Label 'User ID' sekarang diisi dengan 'tujuan' (ID Game)
+	msg := fmt.Sprintf(`
+✅ <b>TRANSAKSI SUKSES</b>
+
+<b>User ID   :</b> %s
+<b>Produk    :</b> %s
+<b>Supplier  :</b> %s
+<b>Tanggal   :</b> %s
+
+<i>Ref ID: %s</i>
+`, tujuan, productName, supplierName, tanggal, supplierOrder.InternalOrderID)
+
+	// 1. Kirim Telegram
+	go sendTelegramNotification(msg)
+
+	// 2. Kirim Webhook
+	webhookURL := os.Getenv("SELLER_WEBHOOK_URL") 
+	if webhookURL != "" {
+		go sendWebhookCallback(webhookURL, supplierOrder.InternalOrderID, "success")
 	}
 
 	return nil
+}
+
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
+	log.Printf("❌ Order %s Failed: %s", orderID, reason)
+	
+	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", reason, orderID).Exec(ctx)
+	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalID).Exec(ctx)
+
+	// Notif Telegram Gagal
+	msg := fmt.Sprintf("❌ <b>TRANSAKSI GAGAL</b>\n\n<b>Err:</b> %s\n<b>ID:</b> %s", reason, orderID)
+	go sendTelegramNotification(msg)
+}
+
+func sendTelegramNotification(messageHTML string) {
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+
+	if botToken == "" || chatID == "" {
+		return 
+	}
+
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+	payload := map[string]string{
+		"chat_id":    chatID,
+		"text":       messageHTML,
+		"parse_mode": "HTML",
+	}
+
+	jsonVal, _ := json.Marshal(payload)
+	http.Post(url, "application/json", bytes.NewBuffer(jsonVal))
+}
+
+func sendWebhookCallback(targetURL string, orderID string, status string) {
+	payload := map[string]interface{}{
+		"order_id":   orderID,
+		"status":     status,
+		"updated_at": time.Now().Format(time.RFC3339),
+	}
+	jsonVal, _ := json.Marshal(payload)
+
+	// Retry Mechanism (3x)
+	for i := 0; i < 3; i++ {
+		resp, err := http.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if resp.Body != nil { resp.Body.Close() }
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
 }

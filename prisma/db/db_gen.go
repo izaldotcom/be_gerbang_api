@@ -99,8 +99,9 @@ model User {
   updated_at DateTime @updatedAt
   updated_by String?
 
-  refreshTokens RefreshToken[]
-  apiKeys       ApiKey[]
+  refreshTokens  RefreshToken[]
+  apiKeys        ApiKey[]
+  internalOrders InternalOrder[]
 
   @@map("user")
 }
@@ -273,10 +274,15 @@ model ProductRecipe {
 }
 
 model InternalOrder {
-  id         String   @id @default(uuid())
+  id         String @id @default(uuid())
   product_id String
   buyer_uid  String
   quantity   Int
+
+  // [BARU] Tambahkan ini
+  user_id String? // Pakai ? dulu agar data lama tidak error
+  user    User?   @relation(fields: [user_id], references: [id])
+
   status     String   @default("pending")
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -613,6 +619,7 @@ const (
 	InternalOrderScalarFieldEnumProductID InternalOrderScalarFieldEnum = "product_id"
 	InternalOrderScalarFieldEnumBuyerUID  InternalOrderScalarFieldEnum = "buyer_uid"
 	InternalOrderScalarFieldEnumQuantity  InternalOrderScalarFieldEnum = "quantity"
+	InternalOrderScalarFieldEnumUserID    InternalOrderScalarFieldEnum = "user_id"
 	InternalOrderScalarFieldEnumStatus    InternalOrderScalarFieldEnum = "status"
 	InternalOrderScalarFieldEnumCreatedAt InternalOrderScalarFieldEnum = "created_at"
 	InternalOrderScalarFieldEnumUpdatedAt InternalOrderScalarFieldEnum = "updated_at"
@@ -766,6 +773,7 @@ const (
 	InternalOrderOrderByRelevanceFieldEnumID        InternalOrderOrderByRelevanceFieldEnum = "id"
 	InternalOrderOrderByRelevanceFieldEnumProductID InternalOrderOrderByRelevanceFieldEnum = "product_id"
 	InternalOrderOrderByRelevanceFieldEnumBuyerUID  InternalOrderOrderByRelevanceFieldEnum = "buyer_uid"
+	InternalOrderOrderByRelevanceFieldEnumUserID    InternalOrderOrderByRelevanceFieldEnum = "user_id"
 	InternalOrderOrderByRelevanceFieldEnumStatus    InternalOrderOrderByRelevanceFieldEnum = "status"
 )
 
@@ -849,6 +857,8 @@ const userFieldUpdatedBy userPrismaFields = "updated_by"
 const userFieldRefreshTokens userPrismaFields = "refreshTokens"
 
 const userFieldAPIKeys userPrismaFields = "apiKeys"
+
+const userFieldInternalOrders userPrismaFields = "internalOrders"
 
 const userFieldRelevance userPrismaFields = "relevance"
 
@@ -1085,6 +1095,10 @@ const internalOrderFieldProductID internalOrderPrismaFields = "product_id"
 const internalOrderFieldBuyerUID internalOrderPrismaFields = "buyer_uid"
 
 const internalOrderFieldQuantity internalOrderPrismaFields = "quantity"
+
+const internalOrderFieldUserID internalOrderPrismaFields = "user_id"
+
+const internalOrderFieldUser internalOrderPrismaFields = "user"
 
 const internalOrderFieldStatus internalOrderPrismaFields = "status"
 
@@ -1875,9 +1889,10 @@ type RawUserModel struct {
 
 // RelationsUser holds the relation data separately
 type RelationsUser struct {
-	Role          *RoleModel          `json:"role,omitempty"`
-	RefreshTokens []RefreshTokenModel `json:"refreshTokens,omitempty"`
-	APIKeys       []APIKeyModel       `json:"apiKeys,omitempty"`
+	Role           *RoleModel           `json:"role,omitempty"`
+	RefreshTokens  []RefreshTokenModel  `json:"refreshTokens,omitempty"`
+	APIKeys        []APIKeyModel        `json:"apiKeys,omitempty"`
+	InternalOrders []InternalOrderModel `json:"internalOrders,omitempty"`
 }
 
 func (r UserModel) RoleID() (value String, ok bool) {
@@ -1941,6 +1956,13 @@ func (r UserModel) APIKeys() (value []APIKeyModel) {
 		panic("attempted to access apiKeys but did not fetch it using the .With() syntax")
 	}
 	return r.RelationsUser.APIKeys
+}
+
+func (r UserModel) InternalOrders() (value []InternalOrderModel) {
+	if r.RelationsUser.InternalOrders == nil {
+		panic("attempted to access internalOrders but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsUser.InternalOrders
 }
 
 // RefreshTokenModel represents the RefreshToken model and is a wrapper for accessing fields and methods
@@ -2516,6 +2538,7 @@ type InnerInternalOrder struct {
 	ProductID string   `json:"product_id"`
 	BuyerUID  string   `json:"buyer_uid"`
 	Quantity  int      `json:"quantity"`
+	UserID    *string  `json:"user_id,omitempty"`
 	Status    string   `json:"status"`
 	CreatedAt DateTime `json:"created_at"`
 	UpdatedAt DateTime `json:"updated_at"`
@@ -2527,6 +2550,7 @@ type RawInternalOrderModel struct {
 	ProductID RawString   `json:"product_id"`
 	BuyerUID  RawString   `json:"buyer_uid"`
 	Quantity  RawInt      `json:"quantity"`
+	UserID    *RawString  `json:"user_id,omitempty"`
 	Status    RawString   `json:"status"`
 	CreatedAt RawDateTime `json:"created_at"`
 	UpdatedAt RawDateTime `json:"updated_at"`
@@ -2534,8 +2558,23 @@ type RawInternalOrderModel struct {
 
 // RelationsInternalOrder holds the relation data separately
 type RelationsInternalOrder struct {
+	User           *UserModel           `json:"user,omitempty"`
 	Product        *ProductModel        `json:"product,omitempty"`
 	SupplierOrders []SupplierOrderModel `json:"supplierOrders,omitempty"`
+}
+
+func (r InternalOrderModel) UserID() (value String, ok bool) {
+	if r.InnerInternalOrder.UserID == nil {
+		return value, false
+	}
+	return *r.InnerInternalOrder.UserID, true
+}
+
+func (r InternalOrderModel) User() (value *UserModel, ok bool) {
+	if r.RelationsInternalOrder.User == nil {
+		return value, false
+	}
+	return r.RelationsInternalOrder.User, true
 }
 
 func (r InternalOrderModel) Product() (value *ProductModel) {
@@ -2737,6 +2776,8 @@ type userQuery struct {
 	RefreshTokens userQueryRefreshTokensRelations
 
 	APIKeys userQueryAPIKeysRelations
+
+	InternalOrders userQueryInternalOrdersRelations
 
 	// Relevance_
 	//
@@ -7551,6 +7592,178 @@ func (r userQueryAPIKeysRelations) Unlink(
 
 func (r userQueryAPIKeysApiKey) Field() userPrismaFields {
 	return userFieldAPIKeys
+}
+
+// base struct
+type userQueryInternalOrdersInternalOrder struct{}
+
+type userQueryInternalOrdersRelations struct{}
+
+// User -> InternalOrders
+//
+// @relation
+// @required
+func (userQueryInternalOrdersRelations) Some(
+	params ...InternalOrderWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "internalOrders",
+			Fields: []builder.Field{
+				{
+					Name:   "some",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> InternalOrders
+//
+// @relation
+// @required
+func (userQueryInternalOrdersRelations) Every(
+	params ...InternalOrderWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "internalOrders",
+			Fields: []builder.Field{
+				{
+					Name:   "every",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> InternalOrders
+//
+// @relation
+// @required
+func (userQueryInternalOrdersRelations) None(
+	params ...InternalOrderWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "internalOrders",
+			Fields: []builder.Field{
+				{
+					Name:   "none",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (userQueryInternalOrdersRelations) Fetch(
+
+	params ...InternalOrderWhereParam,
+
+) userToInternalOrdersFindMany {
+	var v userToInternalOrdersFindMany
+
+	v.query.Operation = "query"
+	v.query.Method = "internalOrders"
+	v.query.Outputs = internalOrderOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r userQueryInternalOrdersRelations) Link(
+	params ...InternalOrderWhereParam,
+) userSetParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userSetParam{
+		data: builder.Field{
+			Name: "internalOrders",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+
+					List:     true,
+					WrapList: true,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryInternalOrdersRelations) Unlink(
+	params ...InternalOrderWhereParam,
+) userSetParam {
+	var v userSetParam
+
+	var fields []builder.Field
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+	v = userSetParam{
+		data: builder.Field{
+			Name: "internalOrders",
+			Fields: []builder.Field{
+				{
+					Name:     "disconnect",
+					List:     true,
+					WrapList: true,
+					Fields:   builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r userQueryInternalOrdersInternalOrder) Field() userPrismaFields {
+	return userFieldInternalOrders
 }
 
 // base struct
@@ -35663,6 +35876,13 @@ type internalOrderQuery struct {
 	// @required
 	Quantity internalOrderQueryQuantityInt
 
+	// UserID
+	//
+	// @optional
+	UserID internalOrderQueryUserIDString
+
+	User internalOrderQueryUserRelations
+
 	// Status
 	//
 	// @required
@@ -37177,6 +37397,486 @@ func (r internalOrderQueryQuantityInt) GTEIfPresent(value *int) internalOrderDef
 
 func (r internalOrderQueryQuantityInt) Field() internalOrderPrismaFields {
 	return internalOrderFieldQuantity
+}
+
+// base struct
+type internalOrderQueryUserIDString struct{}
+
+// Set the optional value of UserID
+func (r internalOrderQueryUserIDString) Set(value string) internalOrderSetParam {
+
+	return internalOrderSetParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of UserID dynamically
+func (r internalOrderQueryUserIDString) SetIfPresent(value *String) internalOrderSetParam {
+	if value == nil {
+		return internalOrderSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of UserID dynamically
+func (r internalOrderQueryUserIDString) SetOptional(value *String) internalOrderSetParam {
+	if value == nil {
+
+		var v *string
+		return internalOrderSetParam{
+			data: builder.Field{
+				Name:  "user_id",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r internalOrderQueryUserIDString) Equals(value string) internalOrderWithPrismaUserIDEqualsParam {
+
+	return internalOrderWithPrismaUserIDEqualsParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) EqualsIfPresent(value *string) internalOrderWithPrismaUserIDEqualsParam {
+	if value == nil {
+		return internalOrderWithPrismaUserIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r internalOrderQueryUserIDString) EqualsOptional(value *String) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) IsNull() internalOrderDefaultParam {
+	var str *string = nil
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) Order(direction SortOrder) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) Cursor(cursor string) internalOrderCursorParam {
+	return internalOrderCursorParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) In(value []string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) InIfPresent(value []string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r internalOrderQueryUserIDString) NotIn(value []string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) NotInIfPresent(value []string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r internalOrderQueryUserIDString) Lt(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) LtIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r internalOrderQueryUserIDString) Lte(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) LteIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r internalOrderQueryUserIDString) Gt(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) GtIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r internalOrderQueryUserIDString) Gte(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) GteIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r internalOrderQueryUserIDString) Contains(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) ContainsIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r internalOrderQueryUserIDString) StartsWith(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) StartsWithIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r internalOrderQueryUserIDString) EndsWith(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) EndsWithIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r internalOrderQueryUserIDString) Search(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) SearchIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r internalOrderQueryUserIDString) Not(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserIDString) NotIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r internalOrderQueryUserIDString) HasPrefix(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r internalOrderQueryUserIDString) HasPrefixIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r internalOrderQueryUserIDString) HasSuffix(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r internalOrderQueryUserIDString) HasSuffixIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r internalOrderQueryUserIDString) Field() internalOrderPrismaFields {
+	return internalOrderFieldUserID
+}
+
+// base struct
+type internalOrderQueryUserUser struct{}
+
+type internalOrderQueryUserRelations struct{}
+
+// InternalOrder -> User
+//
+// @relation
+// @optional
+func (internalOrderQueryUserRelations) Where(
+	params ...UserWhereParam,
+) internalOrderDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "is",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (internalOrderQueryUserRelations) Fetch() internalOrderToUserFindUnique {
+	var v internalOrderToUserFindUnique
+
+	v.query.Operation = "query"
+	v.query.Method = "user"
+	v.query.Outputs = userOutput
+
+	return v
+}
+
+func (r internalOrderQueryUserRelations) Link(
+	params UserWhereParam,
+) internalOrderSetParam {
+	var fields []builder.Field
+
+	f := params.field()
+	if f.Fields == nil && f.Value == nil {
+		return internalOrderSetParam{}
+	}
+
+	fields = append(fields, f)
+
+	return internalOrderSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryUserRelations) Unlink() internalOrderSetParam {
+	var v internalOrderSetParam
+
+	v = internalOrderSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:  "disconnect",
+					Value: true,
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r internalOrderQueryUserUser) Field() internalOrderPrismaFields {
+	return internalOrderFieldUser
 }
 
 // base struct
@@ -45570,6 +46270,84 @@ func (p userWithPrismaAPIKeysEqualsUniqueParam) apiKeysField() {}
 func (userWithPrismaAPIKeysEqualsUniqueParam) unique() {}
 func (userWithPrismaAPIKeysEqualsUniqueParam) equals() {}
 
+type UserWithPrismaInternalOrdersEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	internalOrdersField()
+}
+
+type UserWithPrismaInternalOrdersSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	internalOrdersField()
+}
+
+type userWithPrismaInternalOrdersSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaInternalOrdersSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaInternalOrdersSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaInternalOrdersSetParam) userModel() {}
+
+func (p userWithPrismaInternalOrdersSetParam) internalOrdersField() {}
+
+type UserWithPrismaInternalOrdersWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	internalOrdersField()
+}
+
+type userWithPrismaInternalOrdersEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaInternalOrdersEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaInternalOrdersEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaInternalOrdersEqualsParam) userModel() {}
+
+func (p userWithPrismaInternalOrdersEqualsParam) internalOrdersField() {}
+
+func (userWithPrismaInternalOrdersSetParam) settable()  {}
+func (userWithPrismaInternalOrdersEqualsParam) equals() {}
+
+type userWithPrismaInternalOrdersEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaInternalOrdersEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaInternalOrdersEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaInternalOrdersEqualsUniqueParam) userModel()           {}
+func (p userWithPrismaInternalOrdersEqualsUniqueParam) internalOrdersField() {}
+
+func (userWithPrismaInternalOrdersEqualsUniqueParam) unique() {}
+func (userWithPrismaInternalOrdersEqualsUniqueParam) equals() {}
+
 type refreshTokenActions struct {
 	// client holds the prisma client
 	client *PrismaClient
@@ -46572,6 +47350,11 @@ type aPIKeyWithPrismaUserSetParam struct {
 	query builder.Query
 }
 
+// secretField implements [APIKeyWithPrismaSecretSetParam].
+func (p aPIKeyWithPrismaUserSetParam) secretField() {
+	panic("unimplemented")
+}
+
 func (p aPIKeyWithPrismaUserSetParam) field() builder.Field {
 	return p.data
 }
@@ -46806,6 +47589,11 @@ type aPIKeyWithPrismaAPIKeySetParam struct {
 	query builder.Query
 }
 
+// userField implements [APIKeyWithPrismaUserSetParam].
+func (p aPIKeyWithPrismaAPIKeySetParam) userField() {
+	panic("unimplemented")
+}
+
 func (p aPIKeyWithPrismaAPIKeySetParam) field() builder.Field {
 	return p.data
 }
@@ -46882,6 +47670,11 @@ type APIKeyWithPrismaSecretSetParam interface {
 type aPIKeyWithPrismaSecretSetParam struct {
 	data  builder.Field
 	query builder.Query
+}
+
+// apiKeyField implements [APIKeyWithPrismaAPIKeySetParam].
+func (p aPIKeyWithPrismaSecretSetParam) apiKeyField() {
+	panic("unimplemented")
 }
 
 func (p aPIKeyWithPrismaSecretSetParam) field() builder.Field {
@@ -52950,17 +53743,12 @@ type productSetParam struct {
 	data builder.Field
 }
 
-// nameField implements ProductWithPrismaNameSetParam.
-func (p productSetParam) nameField() {
-	panic("unimplemented")
-}
-
-// getQuery implements ProductWithPrismaSupplierSetParam.
+// getQuery implements [ProductWithPrismaSupplierSetParam].
 func (p productSetParam) getQuery() builder.Query {
 	panic("unimplemented")
 }
 
-// supplierField implements ProductWithPrismaSupplierSetParam.
+// supplierField implements [ProductWithPrismaSupplierSetParam].
 func (p productSetParam) supplierField() {
 	panic("unimplemented")
 }
@@ -53149,11 +53937,6 @@ type productWithPrismaNameSetParam struct {
 	query builder.Query
 }
 
-// denomField implements ProductWithPrismaDenomSetParam.
-func (p productWithPrismaNameSetParam) denomField() {
-	panic("unimplemented")
-}
-
 func (p productWithPrismaNameSetParam) field() builder.Field {
 	return p.data
 }
@@ -53230,11 +54013,6 @@ type ProductWithPrismaDenomSetParam interface {
 type productWithPrismaDenomSetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// priceField implements ProductWithPrismaPriceSetParam.
-func (p productWithPrismaDenomSetParam) priceField() {
-	panic("unimplemented")
 }
 
 func (p productWithPrismaDenomSetParam) field() builder.Field {
@@ -53315,11 +54093,6 @@ type productWithPrismaPriceSetParam struct {
 	query builder.Query
 }
 
-// qtyField implements ProductWithPrismaQtySetParam.
-func (p productWithPrismaPriceSetParam) qtyField() {
-	panic("unimplemented")
-}
-
 func (p productWithPrismaPriceSetParam) field() builder.Field {
 	return p.data
 }
@@ -53396,11 +54169,6 @@ type ProductWithPrismaQtySetParam interface {
 type productWithPrismaQtySetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// supplierField implements ProductWithPrismaSupplierSetParam.
-func (p productWithPrismaQtySetParam) supplierField() {
-	panic("unimplemented")
 }
 
 func (p productWithPrismaQtySetParam) field() builder.Field {
@@ -54583,6 +55351,7 @@ var internalOrderOutput = []builder.Output{
 	{Name: "product_id"},
 	{Name: "buyer_uid"},
 	{Name: "quantity"},
+	{Name: "user_id"},
 	{Name: "status"},
 	{Name: "created_at"},
 	{Name: "updated_at"},
@@ -55063,6 +55832,162 @@ func (p internalOrderWithPrismaQuantityEqualsUniqueParam) quantityField()      {
 
 func (internalOrderWithPrismaQuantityEqualsUniqueParam) unique() {}
 func (internalOrderWithPrismaQuantityEqualsUniqueParam) equals() {}
+
+type InternalOrderWithPrismaUserIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	internalOrderModel()
+	userIDField()
+}
+
+type InternalOrderWithPrismaUserIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	userIDField()
+}
+
+type internalOrderWithPrismaUserIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserIDSetParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaUserIDSetParam) userIDField() {}
+
+type InternalOrderWithPrismaUserIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	userIDField()
+}
+
+type internalOrderWithPrismaUserIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserIDEqualsParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaUserIDEqualsParam) userIDField() {}
+
+func (internalOrderWithPrismaUserIDSetParam) settable()  {}
+func (internalOrderWithPrismaUserIDEqualsParam) equals() {}
+
+type internalOrderWithPrismaUserIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserIDEqualsUniqueParam) internalOrderModel() {}
+func (p internalOrderWithPrismaUserIDEqualsUniqueParam) userIDField()        {}
+
+func (internalOrderWithPrismaUserIDEqualsUniqueParam) unique() {}
+func (internalOrderWithPrismaUserIDEqualsUniqueParam) equals() {}
+
+type InternalOrderWithPrismaUserEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	internalOrderModel()
+	userField()
+}
+
+type InternalOrderWithPrismaUserSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	userField()
+}
+
+type internalOrderWithPrismaUserSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserSetParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaUserSetParam) userField() {}
+
+type InternalOrderWithPrismaUserWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	userField()
+}
+
+type internalOrderWithPrismaUserEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserEqualsParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaUserEqualsParam) userField() {}
+
+func (internalOrderWithPrismaUserSetParam) settable()  {}
+func (internalOrderWithPrismaUserEqualsParam) equals() {}
+
+type internalOrderWithPrismaUserEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaUserEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaUserEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaUserEqualsUniqueParam) internalOrderModel() {}
+func (p internalOrderWithPrismaUserEqualsUniqueParam) userField()          {}
+
+func (internalOrderWithPrismaUserEqualsUniqueParam) unique() {}
+func (internalOrderWithPrismaUserEqualsUniqueParam) equals() {}
 
 type InternalOrderWithPrismaStatusEqualsSetParam interface {
 	field() builder.Field
@@ -59962,6 +60887,560 @@ func (r userToAPIKeysDeleteMany) Exec(ctx context.Context) (*BatchResult, error)
 }
 
 func (r userToAPIKeysDeleteMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToInternalOrdersFindUnique struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindUnique) with()         {}
+func (r userToInternalOrdersFindUnique) userModel()    {}
+func (r userToInternalOrdersFindUnique) userRelation() {}
+
+func (r userToInternalOrdersFindUnique) With(params ...InternalOrderRelationWith) userToInternalOrdersFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToInternalOrdersFindUnique) Select(params ...userPrismaFields) userToInternalOrdersFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindUnique) Omit(params ...userPrismaFields) userToInternalOrdersFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindUnique) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToInternalOrdersFindUnique) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToInternalOrdersFindUnique) Update(params ...UserSetParam) userToInternalOrdersUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "User"
+
+	var v userToInternalOrdersUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToInternalOrdersUpdateUnique struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersUpdateUnique) userModel() {}
+
+func (r userToInternalOrdersUpdateUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToInternalOrdersUpdateUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToInternalOrdersFindUnique) Delete() userToInternalOrdersDeleteUnique {
+	var v userToInternalOrdersDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "User"
+
+	return v
+}
+
+type userToInternalOrdersDeleteUnique struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToInternalOrdersDeleteUnique) userModel() {}
+
+func (r userToInternalOrdersDeleteUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToInternalOrdersDeleteUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToInternalOrdersFindFirst struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindFirst) with()         {}
+func (r userToInternalOrdersFindFirst) userModel()    {}
+func (r userToInternalOrdersFindFirst) userRelation() {}
+
+func (r userToInternalOrdersFindFirst) With(params ...InternalOrderRelationWith) userToInternalOrdersFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Select(params ...userPrismaFields) userToInternalOrdersFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Omit(params ...userPrismaFields) userToInternalOrdersFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) OrderBy(params ...InternalOrderOrderByParam) userToInternalOrdersFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Skip(count int) userToInternalOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Take(count int) userToInternalOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Cursor(cursor UserCursorParam) userToInternalOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindFirst) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToInternalOrdersFindFirst) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type userToInternalOrdersFindMany struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersFindMany) with()         {}
+func (r userToInternalOrdersFindMany) userModel()    {}
+func (r userToInternalOrdersFindMany) userRelation() {}
+
+func (r userToInternalOrdersFindMany) With(params ...InternalOrderRelationWith) userToInternalOrdersFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Select(params ...userPrismaFields) userToInternalOrdersFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Omit(params ...userPrismaFields) userToInternalOrdersFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToInternalOrdersFindMany) OrderBy(params ...InternalOrderOrderByParam) userToInternalOrdersFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Skip(count int) userToInternalOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Take(count int) userToInternalOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Cursor(cursor UserCursorParam) userToInternalOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToInternalOrdersFindMany) Exec(ctx context.Context) (
+	[]UserModel,
+	error,
+) {
+	var v []UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToInternalOrdersFindMany) ExecInner(ctx context.Context) (
+	[]InnerUser,
+	error,
+) {
+	var v []InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToInternalOrdersFindMany) Update(params ...UserSetParam) userToInternalOrdersUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "User"
+
+	r.query.Outputs = countOutput
+
+	var v userToInternalOrdersUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToInternalOrdersUpdateMany struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToInternalOrdersUpdateMany) userModel() {}
+
+func (r userToInternalOrdersUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToInternalOrdersUpdateMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToInternalOrdersFindMany) Delete() userToInternalOrdersDeleteMany {
+	var v userToInternalOrdersDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "User"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type userToInternalOrdersDeleteMany struct {
+	query builder.Query
+}
+
+func (r userToInternalOrdersDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToInternalOrdersDeleteMany) userModel() {}
+
+func (r userToInternalOrdersDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToInternalOrdersDeleteMany) Tx() UserManyTxResult {
 	v := newUserManyTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
@@ -78193,6 +79672,560 @@ func (r productRecipeDeleteMany) Exec(ctx context.Context) (*BatchResult, error)
 
 func (r productRecipeDeleteMany) Tx() ProductRecipeManyTxResult {
 	v := newProductRecipeManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type internalOrderToUserFindUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindUnique) with()                  {}
+func (r internalOrderToUserFindUnique) internalOrderModel()    {}
+func (r internalOrderToUserFindUnique) internalOrderRelation() {}
+
+func (r internalOrderToUserFindUnique) With(params ...UserRelationWith) internalOrderToUserFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToUserFindUnique) Select(params ...internalOrderPrismaFields) internalOrderToUserFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindUnique) Omit(params ...internalOrderPrismaFields) internalOrderToUserFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindUnique) Exec(ctx context.Context) (
+	*InternalOrderModel,
+	error,
+) {
+	var v *InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToUserFindUnique) ExecInner(ctx context.Context) (
+	*InnerInternalOrder,
+	error,
+) {
+	var v *InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToUserFindUnique) Update(params ...InternalOrderSetParam) internalOrderToUserUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "InternalOrder"
+
+	var v internalOrderToUserUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type internalOrderToUserUpdateUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserUpdateUnique) internalOrderModel() {}
+
+func (r internalOrderToUserUpdateUnique) Exec(ctx context.Context) (*InternalOrderModel, error) {
+	var v InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToUserUpdateUnique) Tx() InternalOrderUniqueTxResult {
+	v := newInternalOrderUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r internalOrderToUserFindUnique) Delete() internalOrderToUserDeleteUnique {
+	var v internalOrderToUserDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "InternalOrder"
+
+	return v
+}
+
+type internalOrderToUserDeleteUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p internalOrderToUserDeleteUnique) internalOrderModel() {}
+
+func (r internalOrderToUserDeleteUnique) Exec(ctx context.Context) (*InternalOrderModel, error) {
+	var v InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToUserDeleteUnique) Tx() InternalOrderUniqueTxResult {
+	v := newInternalOrderUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type internalOrderToUserFindFirst struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindFirst) with()                  {}
+func (r internalOrderToUserFindFirst) internalOrderModel()    {}
+func (r internalOrderToUserFindFirst) internalOrderRelation() {}
+
+func (r internalOrderToUserFindFirst) With(params ...UserRelationWith) internalOrderToUserFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Select(params ...internalOrderPrismaFields) internalOrderToUserFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Omit(params ...internalOrderPrismaFields) internalOrderToUserFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindFirst) OrderBy(params ...UserOrderByParam) internalOrderToUserFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Skip(count int) internalOrderToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Take(count int) internalOrderToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Cursor(cursor InternalOrderCursorParam) internalOrderToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r internalOrderToUserFindFirst) Exec(ctx context.Context) (
+	*InternalOrderModel,
+	error,
+) {
+	var v *InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToUserFindFirst) ExecInner(ctx context.Context) (
+	*InnerInternalOrder,
+	error,
+) {
+	var v *InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type internalOrderToUserFindMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserFindMany) with()                  {}
+func (r internalOrderToUserFindMany) internalOrderModel()    {}
+func (r internalOrderToUserFindMany) internalOrderRelation() {}
+
+func (r internalOrderToUserFindMany) With(params ...UserRelationWith) internalOrderToUserFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToUserFindMany) Select(params ...internalOrderPrismaFields) internalOrderToUserFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindMany) Omit(params ...internalOrderPrismaFields) internalOrderToUserFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToUserFindMany) OrderBy(params ...UserOrderByParam) internalOrderToUserFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r internalOrderToUserFindMany) Skip(count int) internalOrderToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToUserFindMany) Take(count int) internalOrderToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToUserFindMany) Cursor(cursor InternalOrderCursorParam) internalOrderToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r internalOrderToUserFindMany) Exec(ctx context.Context) (
+	[]InternalOrderModel,
+	error,
+) {
+	var v []InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToUserFindMany) ExecInner(ctx context.Context) (
+	[]InnerInternalOrder,
+	error,
+) {
+	var v []InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToUserFindMany) Update(params ...InternalOrderSetParam) internalOrderToUserUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "InternalOrder"
+
+	r.query.Outputs = countOutput
+
+	var v internalOrderToUserUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type internalOrderToUserUpdateMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToUserUpdateMany) internalOrderModel() {}
+
+func (r internalOrderToUserUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToUserUpdateMany) Tx() InternalOrderManyTxResult {
+	v := newInternalOrderManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r internalOrderToUserFindMany) Delete() internalOrderToUserDeleteMany {
+	var v internalOrderToUserDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "InternalOrder"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type internalOrderToUserDeleteMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToUserDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p internalOrderToUserDeleteMany) internalOrderModel() {}
+
+func (r internalOrderToUserDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToUserDeleteMany) Tx() InternalOrderManyTxResult {
+	v := newInternalOrderManyTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
 	return v
