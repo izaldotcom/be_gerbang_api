@@ -225,6 +225,7 @@ model SupplierOrder {
   internal_order_id String
   supplier_id       String
   status            String    @default("pending")
+  provider_trx_id   String?   @map("provider_trx_id")
   attempt           Int       @default(0)
   last_error        String?
   created_at        DateTime  @default(now())

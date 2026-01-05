@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"gerbangapi/app/services"
 	"net/http"
 
@@ -24,7 +25,7 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
 		Phone    string `json:"phone"`
-		Status   string `json:"status"`
+		Status   string `json:"status"` // Jika dikosongkan, otomatis "register"
 		Password string `json:"password"`
 	}
 
@@ -33,12 +34,10 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request format"})
 	}
 
-	// Validasi Input Dasar
 	if req.Email == "" || req.Password == "" || req.Name == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Name, Email, and Password are required"})
 	}
 
-	// Panggil Service Register
 	err := h.Service.Register(c.Request().Context(), services.RegisterInput{
 		RoleID:   req.RoleID,
 		Name:     req.Name,
@@ -52,8 +51,9 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Registration failed: " + err.Error()})
 	}
 
+	// Pesan disesuaikan karena sekarang butuh verifikasi
 	return c.JSON(http.StatusOK, echo.Map{
-		"message": "User registered successfully",
+		"message": "Registration successful. Please wait for admin approval.",
 		"data": echo.Map{
 			"email": req.Email,
 			"name":  req.Name,
@@ -67,7 +67,7 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 func (h *AuthHandler) LoginUser(c echo.Context) error {
 	type Req struct {
 		Identifier string `json:"identifier"`
-		Email      string `json:"email"` // Fallback for backward compatibility
+		Email      string `json:"email"`
 		Password   string `json:"password"`
 	}
 
@@ -76,7 +76,6 @@ func (h *AuthHandler) LoginUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request payload"})
 	}
 
-	// Logic Identifier (Priority: identifier > email)
 	finalIdentifier := req.Identifier
 	if finalIdentifier == "" {
 		finalIdentifier = req.Email
@@ -86,14 +85,13 @@ func (h *AuthHandler) LoginUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Identifier (Email/Phone) is required"})
 	}
 
-	// Panggil Service Login
 	tokenResp, err := h.Service.Login(c.Request().Context(), services.LoginInput{
 		Identifier: finalIdentifier,
 		Password:   req.Password,
 	})
 
 	if err != nil {
-		// Return 401 Unauthorized
+		// Pesan error dari service sudah spesifik (reject/register/invalid)
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": err.Error()})
 	}
 
@@ -129,16 +127,14 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 }
 
 // ==========================================
-// 4. GET CURRENT USER (ME) - VIA REDIS
+// 4. GET CURRENT USER (ME)
 // ==========================================
 func (h *AuthHandler) Me(c echo.Context) error {
-	// Ambil UserID dari Context (diset oleh Middleware JWT)
 	userID, ok := c.Get("user_id").(string)
 	if !ok || userID == "" {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
 	}
 
-	// Ambil session dari Redis
 	session, err := h.Service.GetSession(c.Request().Context(), userID)
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Session expired or invalid"})
@@ -146,5 +142,85 @@ func (h *AuthHandler) Me(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"data": session,
+	})
+}
+
+// ==========================================
+// 5. [BARU] VERIFY USER (ADMIN ONLY)
+// ==========================================
+func (h *AuthHandler) VerifyUser(c echo.Context) error {
+	type Req struct {
+		UserID string `json:"user_id"`
+		Action string `json:"action"` // "approve" or "reject"
+	}
+
+	req := new(Req)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid JSON"})
+	}
+
+	if req.UserID == "" || req.Action == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "user_id and action are required"})
+	}
+
+	newStatus, err := h.Service.VerifyUser(c.Request().Context(), req.UserID, req.Action)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message":    "User status updated successfully",
+		"user_id":    req.UserID,
+		"new_status": newStatus,
+	})
+}
+
+// ==========================================
+// 6. GET ALL USERS (ADMIN ONLY)
+// ==========================================
+func (h *AuthHandler) GetUsers(c echo.Context) error {
+	// Panggil Service
+	users, err := h.Service.GetAllUsers(c.Request().Context())
+	
+	if err != nil {
+		// [DEBUG] Print error asli ke Terminal agar tahu penyebabnya
+		fmt.Println("❌ Error GetUsers:", err) 
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Database Error: " + err.Error()})
+	}
+
+	// Mapping Response
+	var response []map[string]interface{}
+
+	for _, u := range users {
+		roleName := "-"
+		roleID := "-"
+		
+		// Gunakan pengecekan aman (ok) untuk relasi
+		if r, ok := u.Role(); ok {
+			roleName = r.Name
+			roleID = r.ID
+		}
+
+		phoneVal := ""
+		if v, ok := u.Phone(); ok { phoneVal = v }
+
+		statusVal := ""
+		if v, ok := u.Status(); ok { statusVal = v }
+
+		response = append(response, map[string]interface{}{
+			"id":         u.ID,
+			"name":       u.Name,
+			"email":      u.Email,
+			"phone":      phoneVal,
+			"status":     statusVal,
+			"role_id":    roleID,
+			"role_name":  roleName,
+			"created_at": u.CreatedAt,
+		})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "success",
+		"data":    response,
 	})
 }

@@ -274,3 +274,66 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		"estimated_time": "1-2 minutes",
 	})
 }
+
+// [BARU] GET HISTORY ORDER
+func (h *SellerHandler) HistoryOrder(c echo.Context) error {
+	// 1. Ambil User ID dari JWT
+	userID, ok := c.Get("user_id").(string)
+	if !ok || userID == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
+	}
+
+	// 2. Panggil Service
+	orders, err := h.OrderService.GetOrderHistory(c.Request().Context(), userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Failed to fetch history: " + err.Error()})
+	}
+
+	// 3. Mapping Response
+	var response []map[string]interface{}
+
+	for _, o := range orders {
+		productName := "Unknown Product"
+		productPrice := 0
+
+		// Ambil Product (Required Relasi)
+		// Return 1 value (pointer)
+		p := o.Product()
+		if p != nil {
+			productName = p.Name
+			productPrice = p.Price
+		}
+
+		sn := "-"
+		
+		// Ambil SupplierOrders (Slice Relasi)
+		sos := o.SupplierOrders()
+		
+		for _, so := range sos {
+			// Cek ProviderTrxID (Optional String)
+			if val, ok := so.ProviderTrxID(); ok && val != "" {
+				sn = val
+				break 
+			}
+		}
+
+		item := map[string]interface{}{
+			"id":           o.ID,
+			"ref_id":       o.ID, // [BARU] Menampilkan ID Transaksi sebagai ref_id
+			"product_name": productName,
+			"destination":  o.BuyerUID,
+			"quantity":     o.Quantity,
+			"status":       o.Status,
+			"sn":           sn,
+			"created_at":   o.CreatedAt,
+			"price":        productPrice,
+		}
+
+		response = append(response, item)
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Order History retrieved successfully",
+		"data":    response,
+	})
+}

@@ -86,12 +86,15 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	if input.RoleID != "" {
 		ops = append(ops, db.User.RoleID.Set(input.RoleID))
 	}
-	if input.Status != "" {
-		ops = append(ops, db.User.Status.Set(input.Status))
-	} else {
-		ops = append(ops, db.User.Status.Set("active"))
-	}
 
+	// Tentukan Status Awal
+	initialStatus := "register" // Default
+	if input.Status != "" {
+		initialStatus = input.Status
+	}
+	ops = append(ops, db.User.Status.Set(initialStatus))
+
+	// Create User
 	userCreated, err := s.DB.User.CreateOne(
 		db.User.Name.Set(input.Name),
 		db.User.Email.Set(input.Email),
@@ -113,16 +116,25 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 			generatedKey := "MH-" + uuid.New().String()
 			generatedSecret := uuid.New().String()
 
-			// Perbaikan: db.APIKey (Huruf Besar API)
+			// [LOGIC BARU]
+			// Jika status user masih "register", API Key default-nya NON-AKTIF (False).
+			// Jika status user "active", API Key langsung AKTIF (True).
+			apiKeyActive := false
+			if initialStatus == "active" {
+				apiKeyActive = true
+			}
+
 			_, errKey := s.DB.APIKey.CreateOne(
 				db.APIKey.APIKey.Set(generatedKey),
 				db.APIKey.Secret.Set(generatedSecret),
 				db.APIKey.User.Link(
 					db.User.ID.Equals(userCreated.ID),
 				),
-				db.APIKey.IsActive.Set(true),
+				// Set status API Key sesuai status User
+				db.APIKey.IsActive.Set(apiKeyActive), 
+				db.APIKey.Status.Set(apiKeyActive),
+				
 				db.APIKey.SellerName.Set(input.Name),
-				db.APIKey.Status.Set(true),
 			).Exec(ctx)
 
 			if errKey != nil {
@@ -134,9 +146,9 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	return nil
 }
 
-// 2. LOGIN (UPDATED FIX)
+// 2. LOGIN
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenResponse, error) {
-	// A. Cari User + Join Role & APIKeys
+	// A. Cari User
 	user, err := s.DB.User.FindFirst(
 		db.User.Or(
 			db.User.Email.Equals(input.Identifier),
@@ -144,7 +156,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		),
 	).With(
 		db.User.Role.Fetch(),
-		db.User.APIKeys.Fetch(), // [FIX] Gunakan APIKeys (Huruf Besar API)
+		db.User.APIKeys.Fetch(),
 	).Exec(ctx)
 
 	if err != nil {
@@ -152,6 +164,17 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 			return nil, errors.New("user not found")
 		}
 		return nil, err
+	}
+
+	// Cek Status User
+	currentStatus, ok := user.Status()
+	if !ok || currentStatus != "active" {
+		if currentStatus == "register" {
+			return nil, errors.New("akun anda sedang dalam proses verifikasi (status: register)")
+		} else if currentStatus == "reject" {
+			return nil, errors.New("akun anda telah ditolak (status: reject)")
+		}
+		return nil, errors.New("akun tidak aktif")
 	}
 
 	// B. Cek Password
@@ -186,17 +209,15 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	roleVal := ""
 	if v, ok := user.RoleID(); ok { roleVal = v }
 
-	statusVal := ""
-	if v, ok := user.Status(); ok { statusVal = v }
+	statusVal := currentStatus
 
 	roleNameVal := ""
 	if roleData, ok := user.Role(); ok { roleNameVal = roleData.Name }
 
-	// [FIX] Ambil API Key (Gunakan APIKeys)
 	userApiKey := ""
-	// Perhatikan method ini juga huruf besar: user.APIKeys()
 	if apiKeys := user.APIKeys(); len(apiKeys) > 0 {
 		for _, key := range apiKeys {
+			// Hanya ambil key yang Active
 			if key.IsActive {
 				userApiKey = key.APIKey
 				break
@@ -212,7 +233,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		RoleID:   roleVal,
 		RoleName: roleNameVal,
 		Status:   statusVal,
-		ApiKey:   userApiKey, // Disimpan ke Session
+		ApiKey:   userApiKey,
 	}
 
 	jsonData, _ := json.Marshal(userSession)
@@ -245,6 +266,11 @@ func (s *AuthService) RefreshTokenProcess(ctx context.Context, refreshTokenInput
 	}
 
 	user := storedToken.User()
+	
+	if status, ok := user.Status(); !ok || status != "active" {
+		return "", errors.New("user status is not active")
+	}
+
 	newAccessToken, err := s.generateAccessToken(user.ID, user.Email)
 
 	return newAccessToken, err
@@ -265,6 +291,73 @@ func (s *AuthService) GetSession(ctx context.Context, userID string) (*UserSessi
 	}
 
 	return &session, nil
+}
+
+// 5. VERIFY USER (APPROVE/REJECT + UPDATE API KEY)
+func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (string, error) {
+	var newStatus string
+
+	// Mapping Action ke Status Database
+	switch strings.ToLower(action) {
+	case "approve":
+		newStatus = "active"
+	case "reject":
+		newStatus = "reject"
+	case "deactivate": // [BARU] Fitur Non-Aktifkan User
+		newStatus = "register" // Kembalikan ke status awal (Register)
+	default:
+		return "", errors.New("invalid action. Use 'approve', 'reject', or 'deactivate'")
+	}
+
+	// 1. Update Status User di Database
+	_, err := s.DB.User.FindUnique(
+		db.User.ID.Equals(userID),
+	).Update(
+		db.User.Status.Set(newStatus),
+	).Exec(ctx)
+
+	if err != nil {
+		return "", err
+	}
+
+	// 2. Update Status API Key
+	if newStatus == "active" {
+		// [AKTIFKAN] Jika Approved, nyalakan API Key
+		s.DB.APIKey.FindMany(
+			db.APIKey.UserID.Equals(userID),
+		).Update(
+			db.APIKey.IsActive.Set(true),
+			db.APIKey.Status.Set(true),
+		).Exec(ctx)
+
+	} else {
+		// [NON-AKTIFKAN] Jika Reject ATAU Deactivate (Register)
+		// API Key dimatikan agar tidak bisa dipakai order/transaksi
+		s.DB.APIKey.FindMany(
+			db.APIKey.UserID.Equals(userID),
+		).Update(
+			db.APIKey.IsActive.Set(false),
+			db.APIKey.Status.Set(false),
+		).Exec(ctx)
+	}
+
+	// 3. Hapus Session Redis (Paksa User Logout / Refresh Token Gagal)
+	s.Redis.Del(ctx, "user_session:"+userID)
+
+	return newStatus, nil
+}
+
+// 6. GET ALL USERS
+func (s *AuthService) GetAllUsers(ctx context.Context) ([]db.UserModel, error) {
+    users, err := s.DB.User.FindMany().With(
+        db.User.Role.Fetch(),
+    ).Exec(ctx) // Hapus OrderBy sementara
+
+    if err != nil {
+        return nil, err
+    }
+
+    return users, nil
 }
 
 // Helper: Generate JWT

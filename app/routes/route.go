@@ -28,7 +28,8 @@ func Init(
 	v1.POST("/register", authHandler.RegisterUser)
 	v1.POST("/login", authHandler.LoginUser)
 	v1.POST("/refresh-token", authHandler.RefreshToken)
-
+	v1.POST("/verify", authHandler.VerifyUser)
+	v1.GET("/users", authHandler.GetUsers)
 	// ==========================================
 	// B. PROTECTED ROUTES (Butuh Bearer Token)
 	// ==========================================
@@ -82,6 +83,7 @@ func Init(
 
 	sellerGroup.GET("/products", sellerHandler.SellerProducts)
 	sellerGroup.POST("/order", sellerHandler.SellerOrder)
+	sellerGroup.GET("/order/history", sellerHandler.HistoryOrder)
 	sellerGroup.GET("/status", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{"message": "Seller status endpoint"})
 	})

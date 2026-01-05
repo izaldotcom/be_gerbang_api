@@ -298,6 +298,7 @@ model SupplierOrder {
   internal_order_id String
   supplier_id       String
   status            String   @default("pending")
+  provider_trx_id   String?  @map("provider_trx_id")
   attempt           Int      @default(0)
   last_error        String?
   created_at        DateTime @default(now())
@@ -632,6 +633,7 @@ const (
 	SupplierOrderScalarFieldEnumInternalOrderID SupplierOrderScalarFieldEnum = "internal_order_id"
 	SupplierOrderScalarFieldEnumSupplierID      SupplierOrderScalarFieldEnum = "supplier_id"
 	SupplierOrderScalarFieldEnumStatus          SupplierOrderScalarFieldEnum = "status"
+	SupplierOrderScalarFieldEnumProviderTrxID   SupplierOrderScalarFieldEnum = "provider_trx_id"
 	SupplierOrderScalarFieldEnumAttempt         SupplierOrderScalarFieldEnum = "attempt"
 	SupplierOrderScalarFieldEnumLastError       SupplierOrderScalarFieldEnum = "last_error"
 	SupplierOrderScalarFieldEnumCreatedAt       SupplierOrderScalarFieldEnum = "created_at"
@@ -784,6 +786,7 @@ const (
 	SupplierOrderOrderByRelevanceFieldEnumInternalOrderID SupplierOrderOrderByRelevanceFieldEnum = "internal_order_id"
 	SupplierOrderOrderByRelevanceFieldEnumSupplierID      SupplierOrderOrderByRelevanceFieldEnum = "supplier_id"
 	SupplierOrderOrderByRelevanceFieldEnumStatus          SupplierOrderOrderByRelevanceFieldEnum = "status"
+	SupplierOrderOrderByRelevanceFieldEnumProviderTrxID   SupplierOrderOrderByRelevanceFieldEnum = "provider_trx_id"
 	SupplierOrderOrderByRelevanceFieldEnumLastError       SupplierOrderOrderByRelevanceFieldEnum = "last_error"
 )
 
@@ -1121,6 +1124,8 @@ const supplierOrderFieldInternalOrderID supplierOrderPrismaFields = "internal_or
 const supplierOrderFieldSupplierID supplierOrderPrismaFields = "supplier_id"
 
 const supplierOrderFieldStatus supplierOrderPrismaFields = "status"
+
+const supplierOrderFieldProviderTrxID supplierOrderPrismaFields = "provider_trx_id"
 
 const supplierOrderFieldAttempt supplierOrderPrismaFields = "attempt"
 
@@ -2603,6 +2608,7 @@ type InnerSupplierOrder struct {
 	InternalOrderID string   `json:"internal_order_id"`
 	SupplierID      string   `json:"supplier_id"`
 	Status          string   `json:"status"`
+	ProviderTrxID   *string  `json:"provider_trx_id,omitempty"`
 	Attempt         int      `json:"attempt"`
 	LastError       *string  `json:"last_error,omitempty"`
 	CreatedAt       DateTime `json:"created_at"`
@@ -2615,6 +2621,7 @@ type RawSupplierOrderModel struct {
 	InternalOrderID RawString   `json:"internal_order_id"`
 	SupplierID      RawString   `json:"supplier_id"`
 	Status          RawString   `json:"status"`
+	ProviderTrxID   *RawString  `json:"provider_trx_id,omitempty"`
 	Attempt         RawInt      `json:"attempt"`
 	LastError       *RawString  `json:"last_error,omitempty"`
 	CreatedAt       RawDateTime `json:"created_at"`
@@ -2626,6 +2633,13 @@ type RelationsSupplierOrder struct {
 	InternalOrder *InternalOrderModel      `json:"internalOrder,omitempty"`
 	Supplier      *SupplierModel           `json:"Supplier,omitempty"`
 	Items         []SupplierOrderItemModel `json:"items,omitempty"`
+}
+
+func (r SupplierOrderModel) ProviderTrxID() (value String, ok bool) {
+	if r.InnerSupplierOrder.ProviderTrxID == nil {
+		return value, false
+	}
+	return *r.InnerSupplierOrder.ProviderTrxID, true
 }
 
 func (r SupplierOrderModel) LastError() (value String, ok bool) {
@@ -38229,6 +38243,10 @@ func (r internalOrderQueryStatusString) Field() internalOrderPrismaFields {
 // base struct
 type internalOrderQueryCreatedAtDateTime struct{}
 
+func (r internalOrderQueryCreatedAtDateTime) OrderDesc() InternalOrderOrderByParam {
+	panic("unimplemented")
+}
+
 // Set the required value of CreatedAt
 func (r internalOrderQueryCreatedAtDateTime) Set(value DateTime) internalOrderSetParam {
 
@@ -39203,6 +39221,11 @@ type supplierOrderQuery struct {
 	//
 	// @required
 	Status supplierOrderQueryStatusString
+
+	// ProviderTrxID
+	//
+	// @optional
+	ProviderTrxID supplierOrderQueryProviderTrxIDString
 
 	// Attempt
 	//
@@ -40673,6 +40696,398 @@ func (r supplierOrderQueryStatusString) HasSuffixIfPresent(value *string) suppli
 
 func (r supplierOrderQueryStatusString) Field() supplierOrderPrismaFields {
 	return supplierOrderFieldStatus
+}
+
+// base struct
+type supplierOrderQueryProviderTrxIDString struct{}
+
+// Set the optional value of ProviderTrxID
+func (r supplierOrderQueryProviderTrxIDString) Set(value string) supplierOrderSetParam {
+
+	return supplierOrderSetParam{
+		data: builder.Field{
+			Name:  "provider_trx_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of ProviderTrxID dynamically
+func (r supplierOrderQueryProviderTrxIDString) SetIfPresent(value *String) supplierOrderSetParam {
+	if value == nil {
+		return supplierOrderSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of ProviderTrxID dynamically
+func (r supplierOrderQueryProviderTrxIDString) SetOptional(value *String) supplierOrderSetParam {
+	if value == nil {
+
+		var v *string
+		return supplierOrderSetParam{
+			data: builder.Field{
+				Name:  "provider_trx_id",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Equals(value string) supplierOrderWithPrismaProviderTrxIDEqualsParam {
+
+	return supplierOrderWithPrismaProviderTrxIDEqualsParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) EqualsIfPresent(value *string) supplierOrderWithPrismaProviderTrxIDEqualsParam {
+	if value == nil {
+		return supplierOrderWithPrismaProviderTrxIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) EqualsOptional(value *String) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) IsNull() supplierOrderDefaultParam {
+	var str *string = nil
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Order(direction SortOrder) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name:  "provider_trx_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Cursor(cursor string) supplierOrderCursorParam {
+	return supplierOrderCursorParam{
+		data: builder.Field{
+			Name:  "provider_trx_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) In(value []string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) InIfPresent(value []string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) NotIn(value []string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) NotInIfPresent(value []string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Lt(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) LtIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Lte(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) LteIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Gt(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) GtIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Gte(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) GteIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Contains(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) ContainsIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) StartsWith(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) StartsWithIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) EndsWith(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) EndsWithIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Search(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) SearchIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Not(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierOrderQueryProviderTrxIDString) NotIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r supplierOrderQueryProviderTrxIDString) HasPrefix(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r supplierOrderQueryProviderTrxIDString) HasPrefixIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r supplierOrderQueryProviderTrxIDString) HasSuffix(value string) supplierOrderDefaultParam {
+	return supplierOrderDefaultParam{
+		data: builder.Field{
+			Name: "provider_trx_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r supplierOrderQueryProviderTrxIDString) HasSuffixIfPresent(value *string) supplierOrderDefaultParam {
+	if value == nil {
+		return supplierOrderDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r supplierOrderQueryProviderTrxIDString) Field() supplierOrderPrismaFields {
+	return supplierOrderFieldProviderTrxID
 }
 
 // base struct
@@ -56389,6 +56804,7 @@ var supplierOrderOutput = []builder.Output{
 	{Name: "internal_order_id"},
 	{Name: "supplier_id"},
 	{Name: "status"},
+	{Name: "provider_trx_id"},
 	{Name: "attempt"},
 	{Name: "last_error"},
 	{Name: "created_at"},
@@ -56870,6 +57286,84 @@ func (p supplierOrderWithPrismaStatusEqualsUniqueParam) statusField()        {}
 
 func (supplierOrderWithPrismaStatusEqualsUniqueParam) unique() {}
 func (supplierOrderWithPrismaStatusEqualsUniqueParam) equals() {}
+
+type SupplierOrderWithPrismaProviderTrxIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	supplierOrderModel()
+	providerTrxIDField()
+}
+
+type SupplierOrderWithPrismaProviderTrxIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierOrderModel()
+	providerTrxIDField()
+}
+
+type supplierOrderWithPrismaProviderTrxIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDSetParam) supplierOrderModel() {}
+
+func (p supplierOrderWithPrismaProviderTrxIDSetParam) providerTrxIDField() {}
+
+type SupplierOrderWithPrismaProviderTrxIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierOrderModel()
+	providerTrxIDField()
+}
+
+type supplierOrderWithPrismaProviderTrxIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsParam) supplierOrderModel() {}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsParam) providerTrxIDField() {}
+
+func (supplierOrderWithPrismaProviderTrxIDSetParam) settable()  {}
+func (supplierOrderWithPrismaProviderTrxIDEqualsParam) equals() {}
+
+type supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) supplierOrderModel() {}
+func (p supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) providerTrxIDField() {}
+
+func (supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) unique() {}
+func (supplierOrderWithPrismaProviderTrxIDEqualsUniqueParam) equals() {}
 
 type SupplierOrderWithPrismaAttemptEqualsSetParam interface {
 	field() builder.Field
