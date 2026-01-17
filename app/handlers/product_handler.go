@@ -55,8 +55,6 @@ func (h *ProductHandler) Create(c echo.Context) error {
 		db.Product.Supplier.Link(
 			db.Supplier.ID.Equals(req.SupplierID),
 		),
-
-		// [URUTAN 6] Optional Fields
 		db.Product.Status.Set(req.Status),
 	).Exec(ctx)
 
