@@ -55,7 +55,7 @@ type JwtClaims struct {
 
 type RegisterInput struct {
 	ID         string
-	RoleID     string
+	// RoleID     string
 	Name       string
 	Email      string
 	Phone      string
@@ -78,14 +78,24 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	}
 	hashed, _ := utils.HashPassword(input.Password)
 
+	// [BARU] Cari Role "Customer" otomatis di Database
+	roleData, err := s.DB.Role.FindFirst(
+		db.Role.Name.Equals("Customer"), // Pastikan di DB namanya "Customer" (Case Sensitive)
+	).Exec(ctx)
+
+	if err != nil {
+		// Jika role Customer tidak ditemukan, return error
+		return errors.New("system error: role 'Customer' not found in database. Please contact admin")
+	}
+
 	var ops []db.UserSetParam
 
 	ops = append(ops, db.User.ID.Set(input.ID))
+	// [BARU] Set Role ID dari hasil query Customer di atas
+	ops = append(ops, db.User.RoleID.Set(roleData.ID))
+
 	if input.Phone != "" {
 		ops = append(ops, db.User.Phone.Set(input.Phone))
-	}
-	if input.RoleID != "" {
-		ops = append(ops, db.User.RoleID.Set(input.RoleID))
 	}
 	if input.WebhookURL != "" {
 		ops = append(ops, db.User.WebhookURL.Set(input.WebhookURL))
@@ -97,6 +107,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	}
 	ops = append(ops, db.User.Status.Set(initialStatus))
 
+	// Create User
 	userCreated, err := s.DB.User.CreateOne(
 		db.User.Name.Set(input.Name),
 		db.User.Email.Set(input.Email),
@@ -109,35 +120,30 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	}
 
 	// [AUTO-GENERATE API KEY]
-	if input.RoleID != "" {
-		roleData, err := s.DB.Role.FindUnique(
-			db.Role.ID.Equals(input.RoleID),
-		).Exec(ctx)
+	// Karena register ini KHUSUS Customer, kita langsung buat API Key tanpa cek RoleID lagi
+	generatedKey := "MH-" + uuid.New().String()
+	generatedSecret := uuid.New().String()
 
-		if err == nil && roleData != nil && strings.EqualFold(roleData.Name, "Customer") {
-			generatedKey := "MH-" + uuid.New().String()
-			generatedSecret := uuid.New().String()
+	apiKeyActive := false
+	if initialStatus == "active" {
+		apiKeyActive = true
+	}
 
-			apiKeyActive := false
-			if initialStatus == "active" {
-				apiKeyActive = true
-			}
+	_, errKey := s.DB.APIKey.CreateOne(
+		// [URUTAN PENTING] Link User harus PERTAMA
+		db.APIKey.User.Link(
+			db.User.ID.Equals(userCreated.ID),
+		),
+		// Field lainnya
+		db.APIKey.APIKey.Set(generatedKey),
+		db.APIKey.Secret.Set(generatedSecret),
+		db.APIKey.IsActive.Set(apiKeyActive),
+		db.APIKey.Status.Set(apiKeyActive),
+		db.APIKey.SellerName.Set(input.Name),
+	).Exec(ctx)
 
-			_, errKey := s.DB.APIKey.CreateOne(
-				db.APIKey.User.Link(
-					db.User.ID.Equals(userCreated.ID),
-				),
-				db.APIKey.APIKey.Set(generatedKey),
-				db.APIKey.Secret.Set(generatedSecret),
-				db.APIKey.IsActive.Set(apiKeyActive),
-				db.APIKey.Status.Set(apiKeyActive),
-				db.APIKey.SellerName.Set(input.Name),
-			).Exec(ctx)
-
-			if errKey != nil {
-				return errKey
-			}
-		}
+	if errKey != nil {
+		return errKey
 	}
 
 	return nil
@@ -354,6 +360,38 @@ func (s *AuthService) GetAllUsers(ctx context.Context) ([]db.UserModel, error) {
     }
 
     return users, nil
+}
+
+// 7. DELETE USER (ADMIN ONLY)
+func (s *AuthService) DeleteUser(ctx context.Context, targetUserID string) error {
+	// Opsional: Cek dulu apakah user ada
+	_, err := s.DB.User.FindUnique(
+		db.User.ID.Equals(targetUserID),
+	).Exec(ctx)
+
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	// HAPUS USER
+	// Prisma akan otomatis menghapus relasi jika diset Cascade di schema.
+	// Jika tidak, API Key dan Refresh Token akan ikut terhapus atau error (tergantung schema).
+	// Asumsi: Schema sudah benar atau kita paksa hapus relasi manual jika perlu.
+	
+	_, err = s.DB.User.FindUnique(
+		db.User.ID.Equals(targetUserID),
+	).Delete().Exec(ctx)
+
+	if err != nil {
+		// Biasanya error muncul jika user masih punya Data Order (InternalOrder)
+		// Karena kita tidak boleh menghapus histori transaksi.
+		return errors.New("gagal menghapus user (mungkin user memiliki data transaksi aktif): " + err.Error())
+	}
+
+	// Bersihkan session di Redis juga
+	s.Redis.Del(ctx, "user_session:"+targetUserID)
+
+	return nil
 }
 
 // Helper: Generate JWT

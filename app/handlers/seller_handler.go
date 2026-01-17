@@ -3,40 +3,173 @@ package handlers
 import (
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"gerbangapi/app/services"
-	"gerbangapi/app/services/scraper"
+	"gerbangapi/app/utils"
 	"gerbangapi/prisma/db"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/redis/go-redis/v9" // [BARU] Import Redis
+	"github.com/redis/go-redis/v9"
 )
 
 type SellerHandler struct {
 	DB           *db.PrismaClient
 	OrderService *services.OrderService
-	Redis        *redis.Client // [BARU] Tambah Field Redis
+	Redis        *redis.Client
 }
 
-// [BARU] Update Constructor terima Redis
+// NewSellerHandler menginisialisasi handler dengan DB, Service, dan Redis
 func NewSellerHandler(dbClient *db.PrismaClient, orderService *services.OrderService, redisClient *redis.Client) *SellerHandler {
 	return &SellerHandler{
 		DB:           dbClient,
 		OrderService: orderService,
-		Redis:        redisClient, // Assign ke struct
+		Redis:        redisClient,
 	}
 }
 
+// ==========================================
+// 1. GET PROFILE (Via X-API-KEY)
+// ==========================================
+func (h *SellerHandler) GetProfile(c echo.Context) error {
+	apiKey := c.Request().Header.Get("X-API-KEY")
+	if apiKey == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Missing X-API-KEY header"})
+	}
+
+	ctx := c.Request().Context()
+
+	// Cari Data User berdasarkan API Key
+	keyData, err := h.DB.APIKey.FindUnique(
+		db.APIKey.APIKey.Equals(apiKey),
+	).With(
+		db.APIKey.User.Fetch(),
+	).Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Invalid API Key"})
+	}
+
+	user := keyData.User()
+	
+	// Handle Nullable Fields agar tidak error saat JSON Marshal
+	phoneVal, _ := user.Phone()
+	webhookVal, _ := user.WebhookURL()
+	statusVal, _ := user.Status()
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Success retrieving seller profile",
+		"data": echo.Map{
+			"id":          user.ID,
+			"name":        user.Name,
+			"email":       user.Email,
+			"phone":       phoneVal,
+			"webhook_url": webhookVal,
+			"api_key":     keyData.APIKey,
+			"status":      statusVal,
+		},
+	})
+}
+
+// ==========================================
+// 2. UPDATE PROFILE (Via X-API-KEY)
+// ==========================================
+func (h *SellerHandler) UpdateProfile(c echo.Context) error {
+	apiKey := c.Request().Header.Get("X-API-KEY")
+	if apiKey == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Missing X-API-KEY header"})
+	}
+
+	ctx := c.Request().Context()
+
+	// Cari Data API Key dulu untuk dapat UserID
+	keyData, err := h.DB.APIKey.FindUnique(
+		db.APIKey.APIKey.Equals(apiKey),
+	).Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Invalid API Key"})
+	}
+
+	userID := keyData.UserID
+
+	// Bind Request
+	type Req struct {
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		Phone      string `json:"phone"`
+		WebhookURL string `json:"webhook_url"`
+		Password   string `json:"password"`
+	}
+
+	req := new(Req)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request format"})
+	}
+
+	// Siapkan Data Update
+	var ops []db.UserSetParam
+
+	if req.Name != "" {
+		ops = append(ops, db.User.Name.Set(req.Name))
+	}
+	if req.Email != "" {
+		ops = append(ops, db.User.Email.Set(req.Email))
+	}
+	if req.Phone != "" {
+		ops = append(ops, db.User.Phone.Set(req.Phone))
+	}
+	if req.WebhookURL != "" {
+		ops = append(ops, db.User.WebhookURL.Set(req.WebhookURL))
+	}
+	
+	// Hash password jika ada perubahan
+	if req.Password != "" {
+		hashed, _ := utils.HashPassword(req.Password)
+		ops = append(ops, db.User.Password.Set(hashed))
+	}
+
+	// Eksekusi Update
+	updatedUser, err := h.DB.User.FindUnique(
+		db.User.ID.Equals(userID),
+	).Update(
+		ops...,
+	).Exec(ctx)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "Unique constraint") {
+			return c.JSON(http.StatusConflict, echo.Map{"error": "Email/Phone already taken"})
+		}
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Failed to update: " + err.Error()})
+	}
+
+	// Handle Nullable Fields untuk Response
+	phoneVal, _ := updatedUser.Phone()
+	webhookVal, _ := updatedUser.WebhookURL()
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Seller profile updated successfully",
+		"data": echo.Map{
+			"id":          updatedUser.ID,
+			"name":        updatedUser.Name,
+			"email":       updatedUser.Email,
+			"phone":       phoneVal,
+			"webhook_url": webhookVal,
+		},
+	})
+}
+
+// ==========================================
+// 3. GET SELLER PRODUCTS
+// ==========================================
 func (h *SellerHandler) SellerProducts(c echo.Context) error {
 	products, err := h.DB.Product.FindMany().With(
 		db.Product.Supplier.Fetch(),
 	).Exec(c.Request().Context())
 
 	if err != nil {
-		return c.JSON(500, echo.Map{"error": err.Error()})
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "List produk internal",
@@ -44,180 +177,30 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 	})
 }
 
-func (h *SellerHandler) SellerOrderOld(c echo.Context) error {
-
-	type Req struct {
-		ProductID   string `json:"product_id"`
-		Destination string `json:"destination"`
-		RefID       string `json:"ref_id"`
-		SupplierID  string `json:"supplier_id"`
-	}
-
-	req := new(Req)
-	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "Invalid request"})
-	}
-
-	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
-		return c.JSON(400, echo.Map{"error": "product_id, destination, dan supplier_id required"})
-	}
-
-	ctx := c.Request().Context()
-
-	// 1) VALIDASI PRODUCT
-	var product *db.ProductModel
-	var err error
-
-	product, err = h.DB.Product.FindUnique(
-		db.Product.ID.Equals(req.ProductID),
-	).Exec(ctx)
-
-	if err != nil {
-		log.Printf("⚠️ Input '%s' bukan UUID valid, mencari berdasarkan Nama...", req.ProductID)
-		product, err = h.DB.Product.FindFirst(
-			db.Product.Name.Contains(req.ProductID),
-		).Exec(ctx)
-
-		if err != nil {
-			return c.JSON(404, echo.Map{"error": "Product tidak ditemukan."})
-		}
-	}
-
-	realProductUUID := product.ID
-	log.Printf("✅ Order: %s | Dest: %s | Supplier: %s", product.Name, req.Destination, req.SupplierID)
-
-	// 2) INSERT INTERNAL ORDER
-	internalOrderID := uuid.New().String()
-	_, err = h.DB.Prisma.ExecuteRaw(
-		`INSERT INTO internal_order 
-			(id, product_id, buyer_uid, quantity, status, created_at, updated_at) 
-			VALUES (?, ?, ?, ?, 'pending', NOW(), NOW())`,
-		internalOrderID, realProductUUID, req.Destination, 1,
-	).Exec(ctx)
-
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Database error: " + err.Error()})
-	}
-
-	// 3) MIXING PROCESS
-	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
-
-	if mixErr != nil {
-		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
-		return c.JSON(400, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
-	}
-
-	// ======================================================
-	// 4) PERSIAPAN SCRAPER
-	// ======================================================
-
-	type ItemToScrape struct {
-		SupplierProductID string `json:"supplier_product_id"` // Matches DB column name
-		Quantity          int    `json:"quantity"`
-	}
-	var items []ItemToScrape
-
-	// Query Join
-	queryExec := h.DB.Prisma.QueryRaw(
-		`SELECT sp.supplier_product_id, soi.quantity 
-		 FROM supplier_order_item soi
-		 JOIN supplier_product sp ON soi.supplier_product_id = sp.id
-		 WHERE soi.supplier_order_id = ?`,
-		supplierOrder.ID,
-	)
-
-	if err := queryExec.Exec(ctx, &items); err != nil {
-		return c.JSON(500, echo.Map{"error": "Failed to fetch order items: " + err.Error()})
-	}
-
-	if len(items) == 0 {
-		return c.JSON(500, echo.Map{"error": "No items to scrape (Recipe empty?)"})
-	}
-
-	// [FIX] Pass h.Redis ke Service Scraper
-	svc, err := scraper.NewMitraHiggsService(false, h.Redis)
-	if err != nil {
-		log.Printf("❌ Browser Init Failed: %v", err)
-		return c.JSON(500, echo.Map{"error": "Browser init failed: " + err.Error()})
-	}
-	defer svc.Close()
-
-	if err := svc.Login(os.Getenv("MH_USERNAME"), os.Getenv("MH_PASSWORD")); err != nil {
-		return c.JSON(502, echo.Map{"error": "Provider login failed: " + err.Error()})
-	}
-
-	// ======================================================
-	// 5) EKSEKUSI ITEM SATU PER SATU
-	// ======================================================
-	var allTrxIDs []string
-	var failedReasons []string
-
-	for idx, item := range items {
-		log.Printf("🤖 Processing Item %d/%d: HTML_ID=%s, QtyLoop=%d", idx+1, len(items), item.SupplierProductID, item.Quantity)
-
-		trxID, err := svc.PlaceOrder(req.Destination, item.SupplierProductID, item.Quantity)
-
-		if err != nil {
-			log.Printf("❌ Gagal di item %s: %v", item.SupplierProductID, err)
-			failedReasons = append(failedReasons, err.Error())
-			break
-		}
-
-		allTrxIDs = append(allTrxIDs, trxID)
-	}
-
-	// ======================================================
-	// 6) FINALISASI STATUS
-	// ======================================================
-
-	if len(failedReasons) > 0 {
-		errMsg := strings.Join(failedReasons, "; ")
-		h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", errMsg, supplierOrder.ID).Exec(ctx)
-		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
-
-		return c.JSON(502, echo.Map{
-			"status":      "failed",
-			"error":       "Provider partial/full failure: " + errMsg,
-			"success_trx": allTrxIDs,
-		})
-	}
-
-	// Sukses Full
-	finalTrxString := strings.Join(allTrxIDs, ", ")
-	h.DB.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success' WHERE id=?", supplierOrder.ID).Exec(ctx)
-	h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", internalOrderID).Exec(ctx)
-
-	return c.JSON(200, echo.Map{
-		"status":      "success",
-		"message":     "Order Processed Successfully",
-		"product":     product.Name,
-		"supplier_id": req.SupplierID,
-		"trx_ids":     finalTrxString,
-	})
-}
-
+// ==========================================
+// 4. CREATE ORDER (Asynchronous / Pending)
+// ==========================================
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	type Req struct {
 		ProductID   string `json:"product_id"`
 		Destination string `json:"destination"`
 		RefID       string `json:"ref_id"`
 		SupplierID  string `json:"supplier_id"`
-		// Opsional: Jika seller ingin mengirim URL webhook dinamis
-		WebhookURL  string `json:"webhook_url"` 
+		WebhookURL  string `json:"webhook_url"` // Opsional
 	}
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(400, echo.Map{"error": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 	}
 
 	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
-		return c.JSON(400, echo.Map{"error": "product_id, destination, dan supplier_id required"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, dan supplier_id required"})
 	}
 
 	ctx := c.Request().Context()
 
-	// 1) VALIDASI PRODUCT (TETAP SAMA)
+	// A. VALIDASI PRODUCT
 	product, err := h.DB.Product.FindUnique(
 		db.Product.ID.Equals(req.ProductID),
 	).Exec(ctx)
@@ -228,56 +211,71 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 			db.Product.Name.Contains(req.ProductID),
 		).Exec(ctx)
 		if err != nil {
-			return c.JSON(404, echo.Map{"error": "Product tidak ditemukan."})
+			return c.JSON(http.StatusNotFound, echo.Map{"error": "Product tidak ditemukan."})
 		}
 	}
 	realProductUUID := product.ID
 
-	// [BARU] Ambil User ID dari Context (diset oleh Middleware Security)
-	userID := c.Get("user_id").(string)
-
-	// 2) INSERT INTERNAL ORDER (Status Awal: Pending)
-	internalOrderID := uuid.New().String()
-    _, err = h.DB.Prisma.ExecuteRaw(
-        `INSERT INTO internal_order 
-            (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
-        internalOrderID, realProductUUID, userID, req.Destination, 1, // <--- Tambah userID di sini
-    ).Exec(ctx)
-
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Database error: " + err.Error()})
+	// B. AMBIL USER ID (Dari Context Middleware)
+	// Pastikan SellerSecurityMiddleware sudah men-set "user_id"
+	userID, ok := c.Get("user_id").(string)
+	if !ok || userID == "" {
+		// Fallback manual jika context kosong (Safety net)
+		apiKey := c.Request().Header.Get("X-API-KEY")
+		if apiKey != "" {
+			keyData, _ := h.DB.APIKey.FindUnique(db.APIKey.APIKey.Equals(apiKey)).Exec(ctx)
+			if keyData != nil {
+				userID = keyData.UserID
+			}
+		}
 	}
 
-	// 3) MIXING PROCESS (Memecah menjadi Supplier Order)
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized: User ID not found"})
+	}
+
+	// C. INSERT INTERNAL ORDER (Status: Pending)
+	internalOrderID := uuid.New().String()
+	_, err = h.DB.Prisma.ExecuteRaw(
+		`INSERT INTO internal_order 
+         (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
+		internalOrderID, realProductUUID, userID, req.Destination, 1,
+	).Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Database error: " + err.Error()})
+	}
+
+	// D. MIXING PROCESS (Memecah menjadi Supplier Order)
 	// Fungsi ini akan membuat row di tabel supplier_order dengan status 'pending'
 	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
 
 	if mixErr != nil {
 		// Update failed jika mixing gagal
 		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
-		return c.JSON(400, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
 	}
 
-	// ======================================================
-	// 4) RESPONSE CEPAT (ASYNCHRONOUS)
-	// ======================================================
-	// Kita tidak melakukan scraping di sini. Worker akan mengambil job berdasarkan status 'pending'.
-	
+	// E. RESPONSE CEPAT (Accepted)
+	// Worker di background akan memproses order yang statusnya 'pending'
 	log.Printf("✅ Order Accepted: %s -> Masuk Antrian Worker", internalOrderID)
 
 	return c.JSON(http.StatusAccepted, echo.Map{
-		"status":      "pending",
-		"message":     "Order accepted and queued for processing",
-		"order_id":    internalOrderID, // ID Internal
-		"supplier_order_id": supplierOrder.ID, // ID untuk tracking worker
-		"estimated_time": "1-2 minutes",
+		"status":            "pending",
+		"message":           "Order accepted and queued for processing",
+		"order_id":          internalOrderID,
+		"supplier_order_id": supplierOrder.ID,
+		"estimated_time":    "1-2 minutes",
 	})
 }
 
-// [BARU] GET HISTORY ORDER
+// ==========================================
+// 5. GET HISTORY ORDER
+// ==========================================
 func (h *SellerHandler) HistoryOrder(c echo.Context) error {
-	// 1. Ambil User ID dari JWT
+	// 1. Ambil User ID dari JWT (karena route ini biasanya diproteksi JWT di dashboard)
+	// Jika dipanggil via API Key, pastikan Middleware men-set user_id
 	userID, ok := c.Get("user_id").(string)
 	if !ok || userID == "" {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
@@ -296,8 +294,7 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 		productName := "Unknown Product"
 		productPrice := 0
 
-		// Ambil Product (Required Relasi)
-		// Return 1 value (pointer)
+		// Ambil Product
 		p := o.Product()
 		if p != nil {
 			productName = p.Name
@@ -306,11 +303,9 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 
 		sn := "-"
 		
-		// Ambil SupplierOrders (Slice Relasi)
+		// Ambil SN dari SupplierOrder pertama yang punya TrxID
 		sos := o.SupplierOrders()
-		
 		for _, so := range sos {
-			// Cek ProviderTrxID (Optional String)
 			if val, ok := so.ProviderTrxID(); ok && val != "" {
 				sn = val
 				break 
@@ -319,7 +314,7 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 
 		item := map[string]interface{}{
 			"id":           o.ID,
-			"ref_id":       o.ID, // [BARU] Menampilkan ID Transaksi sebagai ref_id
+			"ref_id":       o.ID,
 			"product_name": productName,
 			"destination":  o.BuyerUID,
 			"quantity":     o.Quantity,

@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/redis/go-redis/v9" // <--- Import Redis
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -38,7 +38,6 @@ func main() {
 	defer client.Prisma.Disconnect()
 
 	// 3. Setup Redis Connection
-	// Kita inisialisasi disini agar variabel 'redisClient' bisa di-passing ke Service
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379" // Default address
@@ -69,9 +68,7 @@ func main() {
 	// ---------------------------------------------------------
 
 	// A. Services
-	// [UPDATE] Inject Redis Client ke Auth Service
 	authService := services.NewAuthService(client, redisClient)
-	
 	orderService := services.NewOrderService(client)
 
 	// B. Handlers

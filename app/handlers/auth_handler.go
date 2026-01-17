@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"gerbangapi/app/services"
 	"net/http"
+	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -20,12 +22,12 @@ func NewAuthHandler(service *services.AuthService) *AuthHandler {
 // 1. REGISTER USER
 // ==========================================
 func (h *AuthHandler) RegisterUser(c echo.Context) error {
+	// [UPDATE] Struct Request tanpa RoleID
 	type Req struct {
-		RoleID     string `json:"role_id"`
 		Name       string `json:"name"`
 		Email      string `json:"email"`
 		Phone      string `json:"phone"`
-		WebhookURL string `json:"webhook_url"` // [BARU] Opsional
+		WebhookURL string `json:"webhook_url"` // Opsional
 		Status     string `json:"status"`
 		Password   string `json:"password"`
 	}
@@ -39,17 +41,24 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Name, Email, and Password are required"})
 	}
 
+	// Panggil Service (Tanpa RoleID)
 	err := h.Service.Register(c.Request().Context(), services.RegisterInput{
-		RoleID:     req.RoleID,
 		Name:       req.Name,
 		Email:      req.Email,
 		Phone:      req.Phone,
-		WebhookURL: req.WebhookURL, // [BARU] Pass ke service
+		WebhookURL: req.WebhookURL,
 		Status:     req.Status,
 		Password:   req.Password,
 	})
 
 	if err != nil {
+		// Handle Duplicate Email
+		if strings.Contains(err.Error(), "Unique constraint failed") {
+			return c.JSON(http.StatusConflict, echo.Map{
+				"error": "Email sudah terdaftar, silakan gunakan email lain.",
+			})
+		}
+		// Handle Error System (misal: Role Customer belum dibuat di DB)
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Registration failed: " + err.Error()})
 	}
 
@@ -131,18 +140,34 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 // 4. GET CURRENT USER (ME)
 // ==========================================
 func (h *AuthHandler) Me(c echo.Context) error {
-	userID, ok := c.Get("user_id").(string)
-	if !ok || userID == "" {
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
+	// 1. Ambil Token dari Context (key default: "user")
+	userToken, ok := c.Get("user").(*jwt.Token)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Invalid token format"})
 	}
 
+	// 2. Ambil Claims (Payload Data)
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Invalid token claims"})
+	}
+
+	// 3. Ambil User ID dari Claims
+	userID, ok := claims["user_id"].(string)
+	if !ok || userID == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "user_id not found in token"})
+	}
+
+	// 4. Ambil Session dari Redis
 	session, err := h.Service.GetSession(c.Request().Context(), userID)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Session expired or invalid"})
+		// Jika session redis hilang (expired), return 401
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Session expired, please login again"})
 	}
 
 	return c.JSON(http.StatusOK, echo.Map{
-		"data": session,
+		"message": "success",
+		"data":    session,
 	})
 }
 
@@ -223,5 +248,26 @@ func (h *AuthHandler) GetUsers(c echo.Context) error {
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "success",
 		"data":    response,
+	})
+}
+
+// ==========================================
+// 7. DELETE USER (ADMIN ONLY)
+// ==========================================
+func (h *AuthHandler) DeleteUser(c echo.Context) error {
+	// Ambil ID user yang mau dihapus dari Query Param (?id=...)
+	targetUserID := c.QueryParam("id")
+	if targetUserID == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Query param 'id' required"})
+	}
+
+	err := h.Service.DeleteUser(c.Request().Context(), targetUserID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "User deleted successfully",
+		"id":      targetUserID,
 	})
 }
