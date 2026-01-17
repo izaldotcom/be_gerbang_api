@@ -102,14 +102,15 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='processing' WHERE id=?", orderID).Exec(ctx)
 
 	// =================================================================
-	// LANGKAH C: Ambil Data Lengkap (Internal Order)
+	// LANGKAH C: Ambil Data Lengkap (Internal Order + User)
 	// =================================================================
 	
-	// Fetch InternalOrder beserta Relasi Product
+	// [UPDATE] Tambahkan Relation User untuk ambil Webhook
 	internalOrder, err := dbClient.InternalOrder.FindUnique(
 		db.InternalOrder.ID.Equals(supplierOrder.InternalOrderID),
 	).With(
 		db.InternalOrder.Product.Fetch(), 
+		db.InternalOrder.User.Fetch(), // <--- [BARU] Ambil Data User Pemilik Order
 	).Exec(ctx)
 
 	if err != nil {
@@ -149,7 +150,6 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// LANGKAH D: Eksekusi Scraping (Browser)
 	// =================================================================
 	
-	// Gunakan FALSE (Headful) agar browser terlihat dan lebih stabil
 	svc, err := scraper.NewMitraHiggsService(false, redisClient)
 	if err != nil {
 		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Browser Init Failed: "+err.Error())
@@ -193,15 +193,12 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// --- Siapkan Data Notifikasi ---
 	
 	productName := internalOrder.Product().Name
-	
-	// 'tujuan' berisi ID Player/Game (User ID Frontend)
+	productPrice := internalOrder.Product().Price
 	tujuan := internalOrder.BuyerUID 
-	
 	supplierName := supplierMH.Name
 	tanggal := time.Now().Format("02 Jan 2006 15:04:05")
 
-	// Format Pesan HTML Telegram (Sesuai Permintaan)
-	// Label 'User ID' sekarang diisi dengan 'tujuan' (ID Game)
+	// Kirim Telegram (Internal Log)
 	msg := fmt.Sprintf(`
 ✅ <b>TRANSAKSI SUKSES</b>
 
@@ -213,13 +210,39 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 <i>Ref ID: %s</i>
 `, tujuan, productName, supplierName, tanggal, supplierOrder.InternalOrderID)
 
-	// 1. Kirim Telegram
 	go sendTelegramNotification(msg)
 
-	// 2. Kirim Webhook
-	webhookURL := os.Getenv("SELLER_WEBHOOK_URL") 
-	if webhookURL != "" {
-		go sendWebhookCallback(webhookURL, supplierOrder.InternalOrderID, "success")
+	// [UPDATE] Kirim Webhook ke URL User (Dinamis)
+	user, ok := internalOrder.User() 
+	if ok && user != nil {
+		// Cek apakah user punya webhook_url (Nullable)
+		if url, okURL := user.WebhookURL(); okURL && url != "" {
+			log.Printf("🔗 Sending webhook to User: %s", url)
+			// ==========================================
+			// PENYUSUNAN PAYLOAD LENGKAP
+			// ==========================================
+			webhookPayload := map[string]interface{}{
+				"seller_id":    user.ID,
+				"message_type": "transaction_update",
+				"timestamp":    tanggal,
+				"data": map[string]interface{}{
+					"trx_id":       internalOrder.ID,          // ID Transaksi di sistem kita
+					"ref_id":       internalOrder.ID,          // Reference ID (bisa diganti client_ref_id jika ada)
+					"product_name": productName,               // Nama Produk
+					"code":         internalOrder.ProductID,   // Kode Produk / UUID
+					"price":        productPrice,              // Harga Beli
+					"status":       "success",                 // Status Transaksi
+					"status_code":  1,                         // Contoh: 1=Success, 2=Pending, 3=Failed
+					"sn":           providerTrx,               // Serial Number / Bukti Trx dari Provider
+					"destination":  tujuan,                    // No HP / User ID Game
+					"message":      "Transaksi berhasil diproses",
+				},
+			}
+
+			go sendWebhookCallback(url, webhookPayload)
+		} else {
+			log.Println("⚠️ User tidak memiliki Webhook URL, skip callback.")
+		}
 	}
 
 	return nil
@@ -259,21 +282,28 @@ func sendTelegramNotification(messageHTML string) {
 	http.Post(url, "application/json", bytes.NewBuffer(jsonVal))
 }
 
-func sendWebhookCallback(targetURL string, orderID string, status string) {
-	payload := map[string]interface{}{
-		"order_id":   orderID,
-		"status":     status,
-		"updated_at": time.Now().Format(time.RFC3339),
-	}
+// [UPDATE] Terima payload interface{} agar fleksibel mengirim JSON object apapun
+func sendWebhookCallback(targetURL string, payload interface{}) {
 	jsonVal, _ := json.Marshal(payload)
 
 	// Retry Mechanism (3x)
 	for i := 0; i < 3; i++ {
-		resp, err := http.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
+		// Set timeout agar worker tidak hang jika server user lambat
+		client := http.Client{
+			Timeout: 10 * time.Second,
+		}
+		
+		resp, err := client.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if resp.Body != nil { resp.Body.Close() }
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
+			log.Printf("✅ Webhook sent successfully to %s", targetURL)
 			return
 		}
+		
+		log.Printf("⚠️ Webhook failed (attempt %d/3): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
+	log.Printf("❌ Webhook gave up after 3 attempts")
 }

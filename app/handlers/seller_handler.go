@@ -41,10 +41,13 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// Cari Data User berdasarkan API Key
+	// [UPDATE] Tambahkan Fetch Role di dalam relasi User
 	keyData, err := h.DB.APIKey.FindUnique(
 		db.APIKey.APIKey.Equals(apiKey),
 	).With(
-		db.APIKey.User.Fetch(),
+		db.APIKey.User.Fetch().With(
+			db.User.Role.Fetch(), // <--- Ambil Data Role
+		),
 	).Exec(ctx)
 
 	if err != nil {
@@ -53,10 +56,16 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 
 	user := keyData.User()
 	
-	// Handle Nullable Fields agar tidak error saat JSON Marshal
+	// Handle Nullable Fields
 	phoneVal, _ := user.Phone()
 	webhookVal, _ := user.WebhookURL()
 	statusVal, _ := user.Status()
+
+	// [BARU] Ambil Role Name
+	roleName := "-"
+	if r, ok := user.Role(); ok {
+		roleName = r.Name
+	}
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "Success retrieving seller profile",
@@ -68,6 +77,7 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 			"webhook_url": webhookVal,
 			"api_key":     keyData.APIKey,
 			"status":      statusVal,
+			"role_name":   roleName, // <--- Field Baru
 		},
 	})
 }

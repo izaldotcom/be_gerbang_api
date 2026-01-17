@@ -37,14 +37,15 @@ type TokenResponse struct {
 }
 
 type UserSession struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Phone    string `json:"phone"`
-	RoleID   string `json:"role_id"`
-	RoleName string `json:"role_name"`
-	Status   string `json:"status"`
-	ApiKey   string `json:"api_key"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Phone      string `json:"phone"`
+	RoleID     string `json:"role_id"`
+	RoleName   string `json:"role_name"`
+	Status     string `json:"status"`
+	ApiKey     string `json:"api_key"`
+	WebhookURL string `json:"webhook_url"`
 }
 
 type JwtClaims struct {
@@ -209,6 +210,9 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	phoneVal := ""
 	if v, ok := user.Phone(); ok { phoneVal = v }
 
+	webhookVal := ""
+	if v, ok := user.WebhookURL(); ok { webhookVal = v }
+
 	roleVal := ""
 	if v, ok := user.RoleID(); ok { roleVal = v }
 
@@ -237,6 +241,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		RoleName: roleNameVal,
 		Status:   statusVal,
 		ApiKey:   userApiKey,
+		WebhookURL: webhookVal,
 	}
 
 	jsonData, _ := json.Marshal(userSession)
