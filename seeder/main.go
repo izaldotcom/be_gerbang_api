@@ -199,10 +199,8 @@ func main() {
 			db.Product.Denom.Set(p.Denom),
 			db.Product.Price.Set(p.Price),
 			db.Product.Qty.Set(1),
-			db.Product.Status.Set(true),
-			
-            // --- [FIX] LINK KE SUPPLIER ---
 			db.Product.Supplier.Link(db.Supplier.ID.Equals(supplierID)), 
+			db.Product.Status.Set(true),
 		).Exec(ctx)
 
 		if err != nil {

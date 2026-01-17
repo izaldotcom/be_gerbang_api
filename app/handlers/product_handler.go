@@ -36,7 +36,6 @@ func (h *ProductHandler) Create(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid JSON format"})
 	}
 
-	// Validasi Input
 	if req.SupplierID == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "supplier_id wajib diisi"})
 	}
@@ -45,23 +44,20 @@ func (h *ProductHandler) Create(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-
-	// Default Qty
 	finalQty := req.Qty
-	if finalQty <= 0 {
-		finalQty = 1
-	}
+	if finalQty <= 0 { finalQty = 1 }
 
-	// Eksekusi Create (Tanpa Transaction, karena single table)
 	product, err := h.DB.Product.CreateOne(
 		db.Product.Name.Set(req.Name),
 		db.Product.Denom.Set(req.Denom),
 		db.Product.Price.Set(req.Price),
 		db.Product.Qty.Set(finalQty),
-		db.Product.Status.Set(req.Status),
 		db.Product.Supplier.Link(
 			db.Supplier.ID.Equals(req.SupplierID),
 		),
+
+		// [URUTAN 6] Optional Fields
+		db.Product.Status.Set(req.Status),
 	).Exec(ctx)
 
 	if err != nil {

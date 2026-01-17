@@ -21,12 +21,13 @@ func NewAuthHandler(service *services.AuthService) *AuthHandler {
 // ==========================================
 func (h *AuthHandler) RegisterUser(c echo.Context) error {
 	type Req struct {
-		RoleID   string `json:"role_id"`
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Phone    string `json:"phone"`
-		Status   string `json:"status"` // Jika dikosongkan, otomatis "register"
-		Password string `json:"password"`
+		RoleID     string `json:"role_id"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		Phone      string `json:"phone"`
+		WebhookURL string `json:"webhook_url"` // [BARU] Opsional
+		Status     string `json:"status"`
+		Password   string `json:"password"`
 	}
 
 	req := new(Req)
@@ -39,19 +40,19 @@ func (h *AuthHandler) RegisterUser(c echo.Context) error {
 	}
 
 	err := h.Service.Register(c.Request().Context(), services.RegisterInput{
-		RoleID:   req.RoleID,
-		Name:     req.Name,
-		Email:    req.Email,
-		Phone:    req.Phone,
-		Status:   req.Status,
-		Password: req.Password,
+		RoleID:     req.RoleID,
+		Name:       req.Name,
+		Email:      req.Email,
+		Phone:      req.Phone,
+		WebhookURL: req.WebhookURL, // [BARU] Pass ke service
+		Status:     req.Status,
+		Password:   req.Password,
 	})
 
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Registration failed: " + err.Error()})
 	}
 
-	// Pesan disesuaikan karena sekarang butuh verifikasi
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "Registration successful. Please wait for admin approval.",
 		"data": echo.Map{

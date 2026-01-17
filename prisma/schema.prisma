@@ -16,6 +16,7 @@ model User {
   email         String    @unique
   password      String
   phone         String?
+  webhook_url   String?   @map("webhook_url")
   status        String?
   last_login    DateTime?
   
@@ -25,7 +26,7 @@ model User {
   updated_by    String?
 
   refreshTokens RefreshToken[]
-  apiKeys       ApiKey[]
+  apiKeys       APIKey[]
   internalOrders InternalOrder[]
 
   @@map("user")
@@ -44,7 +45,7 @@ model RefreshToken {
   @@map("refresh_token")
 }
 
-model ApiKey {
+model APIKey {
   id          String   @id @default(uuid())
   
   userId      String   @map("user_id")

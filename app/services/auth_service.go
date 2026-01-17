@@ -54,13 +54,14 @@ type JwtClaims struct {
 }
 
 type RegisterInput struct {
-	ID       string
-	RoleID   string
-	Name     string
-	Email    string
-	Phone    string
-	Status   string
-	Password string
+	ID         string
+	RoleID     string
+	Name       string
+	Email      string
+	Phone      string
+	WebhookURL string
+	Status     string
+	Password   string
 }
 
 type LoginInput struct {
@@ -86,15 +87,16 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 	if input.RoleID != "" {
 		ops = append(ops, db.User.RoleID.Set(input.RoleID))
 	}
+	if input.WebhookURL != "" {
+		ops = append(ops, db.User.WebhookURL.Set(input.WebhookURL))
+	}
 
-	// Tentukan Status Awal
-	initialStatus := "register" // Default
+	initialStatus := "register"
 	if input.Status != "" {
 		initialStatus = input.Status
 	}
 	ops = append(ops, db.User.Status.Set(initialStatus))
 
-	// Create User
 	userCreated, err := s.DB.User.CreateOne(
 		db.User.Name.Set(input.Name),
 		db.User.Email.Set(input.Email),
@@ -106,7 +108,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 		return err
 	}
 
-	// AUTO-GENERATE API KEY
+	// [AUTO-GENERATE API KEY]
 	if input.RoleID != "" {
 		roleData, err := s.DB.Role.FindUnique(
 			db.Role.ID.Equals(input.RoleID),
@@ -116,24 +118,19 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) error {
 			generatedKey := "MH-" + uuid.New().String()
 			generatedSecret := uuid.New().String()
 
-			// [LOGIC BARU]
-			// Jika status user masih "register", API Key default-nya NON-AKTIF (False).
-			// Jika status user "active", API Key langsung AKTIF (True).
 			apiKeyActive := false
 			if initialStatus == "active" {
 				apiKeyActive = true
 			}
 
 			_, errKey := s.DB.APIKey.CreateOne(
-				db.APIKey.APIKey.Set(generatedKey),
-				db.APIKey.Secret.Set(generatedSecret),
 				db.APIKey.User.Link(
 					db.User.ID.Equals(userCreated.ID),
 				),
-				// Set status API Key sesuai status User
-				db.APIKey.IsActive.Set(apiKeyActive), 
+				db.APIKey.APIKey.Set(generatedKey),
+				db.APIKey.Secret.Set(generatedSecret),
+				db.APIKey.IsActive.Set(apiKeyActive),
 				db.APIKey.Status.Set(apiKeyActive),
-				
 				db.APIKey.SellerName.Set(input.Name),
 			).Exec(ctx)
 
@@ -156,7 +153,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		),
 	).With(
 		db.User.Role.Fetch(),
-		db.User.APIKeys.Fetch(),
+		db.User.APIKeys.Fetch(), 
 	).Exec(ctx)
 
 	if err != nil {
@@ -217,9 +214,9 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	userApiKey := ""
 	if apiKeys := user.APIKeys(); len(apiKeys) > 0 {
 		for _, key := range apiKeys {
-			// Hanya ambil key yang Active
 			if key.IsActive {
-				userApiKey = key.APIKey
+				// [FIXED] Gunakan APIKey (Huruf Besar Semua)
+				userApiKey = key.APIKey 
 				break
 			}
 		}
@@ -293,7 +290,7 @@ func (s *AuthService) GetSession(ctx context.Context, userID string) (*UserSessi
 	return &session, nil
 }
 
-// 5. VERIFY USER (APPROVE/REJECT + UPDATE API KEY)
+// 5. VERIFY USER
 func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (string, error) {
 	var newStatus string
 
@@ -303,8 +300,8 @@ func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (st
 		newStatus = "active"
 	case "reject":
 		newStatus = "reject"
-	case "deactivate": // [BARU] Fitur Non-Aktifkan User
-		newStatus = "register" // Kembalikan ke status awal (Register)
+	case "deactivate": 
+		newStatus = "register" 
 	default:
 		return "", errors.New("invalid action. Use 'approve', 'reject', or 'deactivate'")
 	}
@@ -322,7 +319,7 @@ func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (st
 
 	// 2. Update Status API Key
 	if newStatus == "active" {
-		// [AKTIFKAN] Jika Approved, nyalakan API Key
+		// [AKTIFKAN]
 		s.DB.APIKey.FindMany(
 			db.APIKey.UserID.Equals(userID),
 		).Update(
@@ -331,8 +328,7 @@ func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (st
 		).Exec(ctx)
 
 	} else {
-		// [NON-AKTIFKAN] Jika Reject ATAU Deactivate (Register)
-		// API Key dimatikan agar tidak bisa dipakai order/transaksi
+		// [NON-AKTIFKAN]
 		s.DB.APIKey.FindMany(
 			db.APIKey.UserID.Equals(userID),
 		).Update(
@@ -341,7 +337,7 @@ func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (st
 		).Exec(ctx)
 	}
 
-	// 3. Hapus Session Redis (Paksa User Logout / Refresh Token Gagal)
+	// 3. Hapus Session Redis
 	s.Redis.Del(ctx, "user_session:"+userID)
 
 	return newStatus, nil
@@ -351,7 +347,7 @@ func (s *AuthService) VerifyUser(ctx context.Context, userID, action string) (st
 func (s *AuthService) GetAllUsers(ctx context.Context) ([]db.UserModel, error) {
     users, err := s.DB.User.FindMany().With(
         db.User.Role.Fetch(),
-    ).Exec(ctx) // Hapus OrderBy sementara
+    ).Exec(ctx) 
 
     if err != nil {
         return nil, err

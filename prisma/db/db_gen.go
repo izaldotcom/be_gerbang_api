@@ -85,14 +85,15 @@ datasource db {
 model User {
   id String @id @default(uuid())
 
-  role_id    String?
-  role       Role?     @relation(fields: [role_id], references: [id])
-  name       String
-  email      String    @unique
-  password   String
-  phone      String?
-  status     String?
-  last_login DateTime?
+  role_id     String?
+  role        Role?     @relation(fields: [role_id], references: [id])
+  name        String
+  email       String    @unique
+  password    String
+  phone       String?
+  webhook_url String?   @map("webhook_url")
+  status      String?
+  last_login  DateTime?
 
   created_at DateTime @default(now())
   created_by String?
@@ -100,7 +101,7 @@ model User {
   updated_by String?
 
   refreshTokens  RefreshToken[]
-  apiKeys        ApiKey[]
+  apiKeys        APIKey[]
   internalOrders InternalOrder[]
 
   @@map("user")
@@ -119,7 +120,7 @@ model RefreshToken {
   @@map("refresh_token")
 }
 
-model ApiKey {
+model APIKey {
   id String @id @default(uuid())
 
   userId String @map("user_id")
@@ -477,18 +478,19 @@ const (
 type UserScalarFieldEnum string
 
 const (
-	UserScalarFieldEnumID        UserScalarFieldEnum = "id"
-	UserScalarFieldEnumRoleID    UserScalarFieldEnum = "role_id"
-	UserScalarFieldEnumName      UserScalarFieldEnum = "name"
-	UserScalarFieldEnumEmail     UserScalarFieldEnum = "email"
-	UserScalarFieldEnumPassword  UserScalarFieldEnum = "password"
-	UserScalarFieldEnumPhone     UserScalarFieldEnum = "phone"
-	UserScalarFieldEnumStatus    UserScalarFieldEnum = "status"
-	UserScalarFieldEnumLastLogin UserScalarFieldEnum = "last_login"
-	UserScalarFieldEnumCreatedAt UserScalarFieldEnum = "created_at"
-	UserScalarFieldEnumCreatedBy UserScalarFieldEnum = "created_by"
-	UserScalarFieldEnumUpdatedAt UserScalarFieldEnum = "updated_at"
-	UserScalarFieldEnumUpdatedBy UserScalarFieldEnum = "updated_by"
+	UserScalarFieldEnumID         UserScalarFieldEnum = "id"
+	UserScalarFieldEnumRoleID     UserScalarFieldEnum = "role_id"
+	UserScalarFieldEnumName       UserScalarFieldEnum = "name"
+	UserScalarFieldEnumEmail      UserScalarFieldEnum = "email"
+	UserScalarFieldEnumPassword   UserScalarFieldEnum = "password"
+	UserScalarFieldEnumPhone      UserScalarFieldEnum = "phone"
+	UserScalarFieldEnumWebhookURL UserScalarFieldEnum = "webhook_url"
+	UserScalarFieldEnumStatus     UserScalarFieldEnum = "status"
+	UserScalarFieldEnumLastLogin  UserScalarFieldEnum = "last_login"
+	UserScalarFieldEnumCreatedAt  UserScalarFieldEnum = "created_at"
+	UserScalarFieldEnumCreatedBy  UserScalarFieldEnum = "created_by"
+	UserScalarFieldEnumUpdatedAt  UserScalarFieldEnum = "updated_at"
+	UserScalarFieldEnumUpdatedBy  UserScalarFieldEnum = "updated_by"
 )
 
 type RefreshTokenScalarFieldEnum string
@@ -668,15 +670,16 @@ const (
 type UserOrderByRelevanceFieldEnum string
 
 const (
-	UserOrderByRelevanceFieldEnumID        UserOrderByRelevanceFieldEnum = "id"
-	UserOrderByRelevanceFieldEnumRoleID    UserOrderByRelevanceFieldEnum = "role_id"
-	UserOrderByRelevanceFieldEnumName      UserOrderByRelevanceFieldEnum = "name"
-	UserOrderByRelevanceFieldEnumEmail     UserOrderByRelevanceFieldEnum = "email"
-	UserOrderByRelevanceFieldEnumPassword  UserOrderByRelevanceFieldEnum = "password"
-	UserOrderByRelevanceFieldEnumPhone     UserOrderByRelevanceFieldEnum = "phone"
-	UserOrderByRelevanceFieldEnumStatus    UserOrderByRelevanceFieldEnum = "status"
-	UserOrderByRelevanceFieldEnumCreatedBy UserOrderByRelevanceFieldEnum = "created_by"
-	UserOrderByRelevanceFieldEnumUpdatedBy UserOrderByRelevanceFieldEnum = "updated_by"
+	UserOrderByRelevanceFieldEnumID         UserOrderByRelevanceFieldEnum = "id"
+	UserOrderByRelevanceFieldEnumRoleID     UserOrderByRelevanceFieldEnum = "role_id"
+	UserOrderByRelevanceFieldEnumName       UserOrderByRelevanceFieldEnum = "name"
+	UserOrderByRelevanceFieldEnumEmail      UserOrderByRelevanceFieldEnum = "email"
+	UserOrderByRelevanceFieldEnumPassword   UserOrderByRelevanceFieldEnum = "password"
+	UserOrderByRelevanceFieldEnumPhone      UserOrderByRelevanceFieldEnum = "phone"
+	UserOrderByRelevanceFieldEnumWebhookURL UserOrderByRelevanceFieldEnum = "webhook_url"
+	UserOrderByRelevanceFieldEnumStatus     UserOrderByRelevanceFieldEnum = "status"
+	UserOrderByRelevanceFieldEnumCreatedBy  UserOrderByRelevanceFieldEnum = "created_by"
+	UserOrderByRelevanceFieldEnumUpdatedBy  UserOrderByRelevanceFieldEnum = "updated_by"
 )
 
 type RefreshTokenOrderByRelevanceFieldEnum string
@@ -844,6 +847,8 @@ const userFieldEmail userPrismaFields = "email"
 const userFieldPassword userPrismaFields = "password"
 
 const userFieldPhone userPrismaFields = "phone"
+
+const userFieldWebhookURL userPrismaFields = "webhook_url"
 
 const userFieldStatus userPrismaFields = "status"
 
@@ -1862,34 +1867,36 @@ type UserModel struct {
 
 // InnerUser holds the actual data
 type InnerUser struct {
-	ID        string    `json:"id"`
-	RoleID    *string   `json:"role_id,omitempty"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Password  string    `json:"password"`
-	Phone     *string   `json:"phone,omitempty"`
-	Status    *string   `json:"status,omitempty"`
-	LastLogin *DateTime `json:"last_login,omitempty"`
-	CreatedAt DateTime  `json:"created_at"`
-	CreatedBy *string   `json:"created_by,omitempty"`
-	UpdatedAt DateTime  `json:"updated_at"`
-	UpdatedBy *string   `json:"updated_by,omitempty"`
+	ID         string    `json:"id"`
+	RoleID     *string   `json:"role_id,omitempty"`
+	Name       string    `json:"name"`
+	Email      string    `json:"email"`
+	Password   string    `json:"password"`
+	Phone      *string   `json:"phone,omitempty"`
+	WebhookURL *string   `json:"webhook_url,omitempty"`
+	Status     *string   `json:"status,omitempty"`
+	LastLogin  *DateTime `json:"last_login,omitempty"`
+	CreatedAt  DateTime  `json:"created_at"`
+	CreatedBy  *string   `json:"created_by,omitempty"`
+	UpdatedAt  DateTime  `json:"updated_at"`
+	UpdatedBy  *string   `json:"updated_by,omitempty"`
 }
 
 // RawUserModel is a struct for User when used in raw queries
 type RawUserModel struct {
-	ID        RawString    `json:"id"`
-	RoleID    *RawString   `json:"role_id,omitempty"`
-	Name      RawString    `json:"name"`
-	Email     RawString    `json:"email"`
-	Password  RawString    `json:"password"`
-	Phone     *RawString   `json:"phone,omitempty"`
-	Status    *RawString   `json:"status,omitempty"`
-	LastLogin *RawDateTime `json:"last_login,omitempty"`
-	CreatedAt RawDateTime  `json:"created_at"`
-	CreatedBy *RawString   `json:"created_by,omitempty"`
-	UpdatedAt RawDateTime  `json:"updated_at"`
-	UpdatedBy *RawString   `json:"updated_by,omitempty"`
+	ID         RawString    `json:"id"`
+	RoleID     *RawString   `json:"role_id,omitempty"`
+	Name       RawString    `json:"name"`
+	Email      RawString    `json:"email"`
+	Password   RawString    `json:"password"`
+	Phone      *RawString   `json:"phone,omitempty"`
+	WebhookURL *RawString   `json:"webhook_url,omitempty"`
+	Status     *RawString   `json:"status,omitempty"`
+	LastLogin  *RawDateTime `json:"last_login,omitempty"`
+	CreatedAt  RawDateTime  `json:"created_at"`
+	CreatedBy  *RawString   `json:"created_by,omitempty"`
+	UpdatedAt  RawDateTime  `json:"updated_at"`
+	UpdatedBy  *RawString   `json:"updated_by,omitempty"`
 }
 
 // RelationsUser holds the relation data separately
@@ -1919,6 +1926,13 @@ func (r UserModel) Phone() (value String, ok bool) {
 		return value, false
 	}
 	return *r.InnerUser.Phone, true
+}
+
+func (r UserModel) WebhookURL() (value String, ok bool) {
+	if r.InnerUser.WebhookURL == nil {
+		return value, false
+	}
+	return *r.InnerUser.WebhookURL, true
 }
 
 func (r UserModel) Status() (value String, ok bool) {
@@ -2006,7 +2020,7 @@ func (r RefreshTokenModel) User() (value *UserModel) {
 	return r.RelationsRefreshToken.User
 }
 
-// APIKeyModel represents the ApiKey model and is a wrapper for accessing fields and methods
+// APIKeyModel represents the APIKey model and is a wrapper for accessing fields and methods
 type APIKeyModel struct {
 	InnerAPIKey
 	RelationsAPIKey
@@ -2025,7 +2039,7 @@ type InnerAPIKey struct {
 	UpdatedAt  DateTime `json:"updated_at"`
 }
 
-// RawAPIKeyModel is a struct for ApiKey when used in raw queries
+// RawAPIKeyModel is a struct for APIKey when used in raw queries
 type RawAPIKeyModel struct {
 	ID         RawString   `json:"id"`
 	UserID     RawString   `json:"userId"`
@@ -2756,6 +2770,11 @@ type userQuery struct {
 	//
 	// @optional
 	Phone userQueryPhoneString
+
+	// WebhookURL
+	//
+	// @optional
+	WebhookURL userQueryWebhookURLString
 
 	// Status
 	//
@@ -5111,6 +5130,398 @@ func (r userQueryPhoneString) Field() userPrismaFields {
 }
 
 // base struct
+type userQueryWebhookURLString struct{}
+
+// Set the optional value of WebhookURL
+func (r userQueryWebhookURLString) Set(value string) userSetParam {
+
+	return userSetParam{
+		data: builder.Field{
+			Name:  "webhook_url",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of WebhookURL dynamically
+func (r userQueryWebhookURLString) SetIfPresent(value *String) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of WebhookURL dynamically
+func (r userQueryWebhookURLString) SetOptional(value *String) userSetParam {
+	if value == nil {
+
+		var v *string
+		return userSetParam{
+			data: builder.Field{
+				Name:  "webhook_url",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r userQueryWebhookURLString) Equals(value string) userWithPrismaWebhookURLEqualsParam {
+
+	return userWithPrismaWebhookURLEqualsParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) EqualsIfPresent(value *string) userWithPrismaWebhookURLEqualsParam {
+	if value == nil {
+		return userWithPrismaWebhookURLEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r userQueryWebhookURLString) EqualsOptional(value *String) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) IsNull() userDefaultParam {
+	var str *string = nil
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) Order(direction SortOrder) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name:  "webhook_url",
+			Value: direction,
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) Cursor(cursor string) userCursorParam {
+	return userCursorParam{
+		data: builder.Field{
+			Name:  "webhook_url",
+			Value: cursor,
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) In(value []string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) InIfPresent(value []string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r userQueryWebhookURLString) NotIn(value []string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) NotInIfPresent(value []string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r userQueryWebhookURLString) Lt(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) LtIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r userQueryWebhookURLString) Lte(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) LteIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r userQueryWebhookURLString) Gt(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) GtIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r userQueryWebhookURLString) Gte(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) GteIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r userQueryWebhookURLString) Contains(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) ContainsIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r userQueryWebhookURLString) StartsWith(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) StartsWithIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r userQueryWebhookURLString) EndsWith(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) EndsWithIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r userQueryWebhookURLString) Search(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) SearchIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r userQueryWebhookURLString) Not(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryWebhookURLString) NotIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r userQueryWebhookURLString) HasPrefix(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r userQueryWebhookURLString) HasPrefixIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r userQueryWebhookURLString) HasSuffix(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "webhook_url",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r userQueryWebhookURLString) HasSuffixIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r userQueryWebhookURLString) Field() userPrismaFields {
+	return userFieldWebhookURL
+}
+
+// base struct
 type userQueryStatusString struct{}
 
 // Set the optional value of Status
@@ -7437,7 +7848,7 @@ func (r userQueryRefreshTokensRefreshToken) Field() userPrismaFields {
 }
 
 // base struct
-type userQueryAPIKeysApiKey struct{}
+type userQueryAPIKeysAPIKey struct{}
 
 type userQueryAPIKeysRelations struct{}
 
@@ -7604,7 +8015,7 @@ func (r userQueryAPIKeysRelations) Unlink(
 	return v
 }
 
-func (r userQueryAPIKeysApiKey) Field() userPrismaFields {
+func (r userQueryAPIKeysAPIKey) Field() userPrismaFields {
 	return userFieldAPIKeys
 }
 
@@ -12501,6 +12912,69 @@ func (r aPIKeyQueryUpdatedAtDateTime) Field() aPIKeyPrismaFields {
 
 // base struct
 type aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput struct{}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) Fields(value []APIKeyOrderByRelevanceFieldEnum) aPIKeyDefaultParam {
+	return aPIKeyDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "fields",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) FieldsIfPresent(value []APIKeyOrderByRelevanceFieldEnum) aPIKeyDefaultParam {
+	if value == nil {
+		return aPIKeyDefaultParam{}
+	}
+	return r.Fields(value)
+}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) Sort(value SortOrder) aPIKeyDefaultParam {
+	return aPIKeyDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "sort",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) SortIfPresent(value *SortOrder) aPIKeyDefaultParam {
+	if value == nil {
+		return aPIKeyDefaultParam{}
+	}
+	return r.Sort(*value)
+}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) Search(value string) aPIKeyDefaultParam {
+	return aPIKeyDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) SearchIfPresent(value *string) aPIKeyDefaultParam {
+	if value == nil {
+		return aPIKeyDefaultParam{}
+	}
+	return r.Search(*value)
+}
 
 func (r aPIKeyQueryRelevanceAPIKeyOrderByRelevanceInput) Field() aPIKeyPrismaFields {
 	return aPIKeyFieldRelevance
@@ -38243,10 +38717,6 @@ func (r internalOrderQueryStatusString) Field() internalOrderPrismaFields {
 // base struct
 type internalOrderQueryCreatedAtDateTime struct{}
 
-func (r internalOrderQueryCreatedAtDateTime) OrderDesc() InternalOrderOrderByParam {
-	panic("unimplemented")
-}
-
 // Set the required value of CreatedAt
 func (r internalOrderQueryCreatedAtDateTime) Set(value DateTime) internalOrderSetParam {
 
@@ -45343,6 +45813,7 @@ var userOutput = []builder.Output{
 	{Name: "email"},
 	{Name: "password"},
 	{Name: "phone"},
+	{Name: "webhook_url"},
 	{Name: "status"},
 	{Name: "last_login"},
 	{Name: "created_at"},
@@ -46060,6 +46531,84 @@ func (p userWithPrismaPhoneEqualsUniqueParam) phoneField() {}
 
 func (userWithPrismaPhoneEqualsUniqueParam) unique() {}
 func (userWithPrismaPhoneEqualsUniqueParam) equals() {}
+
+type UserWithPrismaWebhookURLEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	webhookURLField()
+}
+
+type UserWithPrismaWebhookURLSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	webhookURLField()
+}
+
+type userWithPrismaWebhookURLSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaWebhookURLSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaWebhookURLSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaWebhookURLSetParam) userModel() {}
+
+func (p userWithPrismaWebhookURLSetParam) webhookURLField() {}
+
+type UserWithPrismaWebhookURLWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	webhookURLField()
+}
+
+type userWithPrismaWebhookURLEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaWebhookURLEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaWebhookURLEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaWebhookURLEqualsParam) userModel() {}
+
+func (p userWithPrismaWebhookURLEqualsParam) webhookURLField() {}
+
+func (userWithPrismaWebhookURLSetParam) settable()  {}
+func (userWithPrismaWebhookURLEqualsParam) equals() {}
+
+type userWithPrismaWebhookURLEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaWebhookURLEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaWebhookURLEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaWebhookURLEqualsUniqueParam) userModel()       {}
+func (p userWithPrismaWebhookURLEqualsUniqueParam) webhookURLField() {}
+
+func (userWithPrismaWebhookURLEqualsUniqueParam) unique() {}
+func (userWithPrismaWebhookURLEqualsUniqueParam) equals() {}
 
 type UserWithPrismaStatusEqualsSetParam interface {
 	field() builder.Field
@@ -47765,11 +48314,6 @@ type aPIKeyWithPrismaUserSetParam struct {
 	query builder.Query
 }
 
-// secretField implements [APIKeyWithPrismaSecretSetParam].
-func (p aPIKeyWithPrismaUserSetParam) secretField() {
-	panic("unimplemented")
-}
-
 func (p aPIKeyWithPrismaUserSetParam) field() builder.Field {
 	return p.data
 }
@@ -48004,11 +48548,6 @@ type aPIKeyWithPrismaAPIKeySetParam struct {
 	query builder.Query
 }
 
-// userField implements [APIKeyWithPrismaUserSetParam].
-func (p aPIKeyWithPrismaAPIKeySetParam) userField() {
-	panic("unimplemented")
-}
-
 func (p aPIKeyWithPrismaAPIKeySetParam) field() builder.Field {
 	return p.data
 }
@@ -48085,11 +48624,6 @@ type APIKeyWithPrismaSecretSetParam interface {
 type aPIKeyWithPrismaSecretSetParam struct {
 	data  builder.Field
 	query builder.Query
-}
-
-// apiKeyField implements [APIKeyWithPrismaAPIKeySetParam].
-func (p aPIKeyWithPrismaSecretSetParam) apiKeyField() {
-	panic("unimplemented")
 }
 
 func (p aPIKeyWithPrismaSecretSetParam) field() builder.Field {
@@ -54158,16 +54692,6 @@ type productSetParam struct {
 	data builder.Field
 }
 
-// getQuery implements [ProductWithPrismaSupplierSetParam].
-func (p productSetParam) getQuery() builder.Query {
-	panic("unimplemented")
-}
-
-// supplierField implements [ProductWithPrismaSupplierSetParam].
-func (p productSetParam) supplierField() {
-	panic("unimplemented")
-}
-
 func (productSetParam) settable() {}
 
 func (p productSetParam) field() builder.Field {
@@ -58873,7 +59397,7 @@ func (r aPIKeyActions) CreateOne(
 
 	v.query.Operation = "mutation"
 	v.query.Method = "createOne"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 	v.query.Outputs = aPIKeyOutput
 
 	var fields []builder.Field
@@ -63892,7 +64416,7 @@ func (r aPIKeyToUserFindUnique) ExecInner(ctx context.Context) (
 func (r aPIKeyToUserFindUnique) Update(params ...APIKeySetParam) aPIKeyToUserUpdateUnique {
 	r.query.Operation = "mutation"
 	r.query.Method = "updateOne"
-	r.query.Model = "ApiKey"
+	r.query.Model = "APIKey"
 
 	var v aPIKeyToUserUpdateUnique
 	v.query = r.query
@@ -63953,7 +64477,7 @@ func (r aPIKeyToUserFindUnique) Delete() aPIKeyToUserDeleteUnique {
 	v.query = r.query
 	v.query.Operation = "mutation"
 	v.query.Method = "deleteOne"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	return v
 }
@@ -64254,7 +64778,7 @@ func (r aPIKeyToUserFindMany) ExecInner(ctx context.Context) (
 func (r aPIKeyToUserFindMany) Update(params ...APIKeySetParam) aPIKeyToUserUpdateMany {
 	r.query.Operation = "mutation"
 	r.query.Method = "updateMany"
-	r.query.Model = "ApiKey"
+	r.query.Model = "APIKey"
 
 	r.query.Outputs = countOutput
 
@@ -64317,7 +64841,7 @@ func (r aPIKeyToUserFindMany) Delete() aPIKeyToUserDeleteMany {
 	v.query = r.query
 	v.query.Operation = "mutation"
 	v.query.Method = "deleteMany"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	v.query.Outputs = countOutput
 
@@ -64376,7 +64900,7 @@ func (r aPIKeyActions) FindUnique(
 
 	v.query.Method = "findUnique"
 
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 	v.query.Outputs = aPIKeyOutput
 
 	v.query.Inputs = append(v.query.Inputs, builder.Input{
@@ -64468,7 +64992,7 @@ func (r aPIKeyFindUnique) ExecInner(ctx context.Context) (
 func (r aPIKeyFindUnique) Update(params ...APIKeySetParam) aPIKeyUpdateUnique {
 	r.query.Operation = "mutation"
 	r.query.Method = "updateOne"
-	r.query.Model = "ApiKey"
+	r.query.Model = "APIKey"
 
 	var v aPIKeyUpdateUnique
 	v.query = r.query
@@ -64529,7 +65053,7 @@ func (r aPIKeyFindUnique) Delete() aPIKeyDeleteUnique {
 	v.query = r.query
 	v.query.Operation = "mutation"
 	v.query.Method = "deleteOne"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	return v
 }
@@ -64586,7 +65110,7 @@ func (r aPIKeyActions) FindFirst(
 
 	v.query.Method = "findFirst"
 
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 	v.query.Outputs = aPIKeyOutput
 
 	var where []builder.Field
@@ -64761,7 +65285,7 @@ func (r aPIKeyActions) FindMany(
 
 	v.query.Method = "findMany"
 
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 	v.query.Outputs = aPIKeyOutput
 
 	var where []builder.Field
@@ -64904,7 +65428,7 @@ func (r aPIKeyFindMany) ExecInner(ctx context.Context) (
 func (r aPIKeyFindMany) Update(params ...APIKeySetParam) aPIKeyUpdateMany {
 	r.query.Operation = "mutation"
 	r.query.Method = "updateMany"
-	r.query.Model = "ApiKey"
+	r.query.Model = "APIKey"
 
 	r.query.Outputs = countOutput
 
@@ -64967,7 +65491,7 @@ func (r aPIKeyFindMany) Delete() aPIKeyDeleteMany {
 	v.query = r.query
 	v.query.Operation = "mutation"
 	v.query.Method = "deleteMany"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	v.query.Outputs = countOutput
 
@@ -87548,7 +88072,7 @@ func (r aPIKeyActions) UpsertOne(
 
 	v.query.Operation = "mutation"
 	v.query.Method = "upsertOne"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 	v.query.Outputs = aPIKeyOutput
 
 	v.query.Inputs = append(v.query.Inputs, builder.Input{
@@ -89473,7 +89997,7 @@ func (r aPIKeyActions) FindRaw(filter interface{}, options ...interface{}) aPIKe
 	v.query.Engine = r.client
 	v.query.Method = "findRaw"
 	v.query.Operation = "query"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	v.query.Inputs = append(v.query.Inputs, builder.Input{
 		Name:  "filter",
@@ -89495,7 +90019,7 @@ func (r aPIKeyActions) AggregateRaw(pipeline []interface{}, options ...interface
 	v.query.Engine = r.client
 	v.query.Method = "aggregateRaw"
 	v.query.Operation = "query"
-	v.query.Model = "ApiKey"
+	v.query.Model = "APIKey"
 
 	parsedPip := []interface{}{}
 	for _, p := range pipeline {
