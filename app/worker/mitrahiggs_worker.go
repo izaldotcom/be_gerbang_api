@@ -1,4 +1,4 @@
-package main
+package worker
 
 import (
 	"bytes"
@@ -14,58 +14,29 @@ import (
 	"gerbangapi/app/services/scraper"
 	"gerbangapi/prisma/db"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 )
 
 var ctx = context.Background()
 
-func main() {
-	// 1. Load Env
-	if err := godotenv.Load(".env"); err != nil {
-		if err2 := godotenv.Load("../.env"); err2 != nil {
-			log.Println("⚠️  Warning: .env file not found. Menggunakan System Env.")
+// StartWorker memulai worker di background (Goroutine)
+// Dipanggil dari main.go
+func StartWorker(dbClient *db.PrismaClient, redisClient *redis.Client) {
+	log.Println("🚀 Starting MitraHiggs Order Worker (Background Mode)...")
+
+	// Jalankan di Goroutine agar tidak memblokir server API
+	go func() {
+		for {
+			err := processNextSupplierOrder(dbClient, redisClient)
+			if err != nil {
+				// Log error tapi worker tetap jalan
+				log.Printf("❌ Worker Error: %v", err)
+			}
+
+			// Jeda 5 detik sebelum mengecek antrian lagi
+			time.Sleep(5 * time.Second)
 		}
-	}
-
-	log.Println("🚀 Starting MitraHiggs Order Worker...")
-
-	// 2. Connect Database
-	dbClient := db.NewClient()
-	if err := dbClient.Prisma.Connect(); err != nil {
-		log.Fatalf("❌ Fatal Error: Failed to connect to database: %v", err)
-	}
-	defer dbClient.Prisma.Disconnect()
-
-	// 3. Connect Redis (Tetap dibutuhkan untuk Scraper Session)
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Password: "",
-		DB:       0,
-	})
-
-	// Cek koneksi Redis
-	if _, err := redisClient.Ping(ctx).Result(); err != nil {
-		log.Printf("⚠️  Warning: Gagal connect ke Redis: %v", err)
-	} else {
-		log.Println("✅ Database & Redis Connected. Worker is running...")
-	}
-
-	// 4. Infinite Loop Worker
-	for {
-		err := processNextSupplierOrder(dbClient, redisClient)
-		if err != nil {
-			log.Printf("❌ Worker Error: %v", err)
-		}
-
-		// Jeda 5 detik sebelum mengecek antrian lagi
-		time.Sleep(5 * time.Second)
-	}
+	}()
 }
 
 func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Client) error {
@@ -105,12 +76,11 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// LANGKAH C: Ambil Data Lengkap (Internal Order + User)
 	// =================================================================
 	
-	// [UPDATE] Tambahkan Relation User untuk ambil Webhook
 	internalOrder, err := dbClient.InternalOrder.FindUnique(
 		db.InternalOrder.ID.Equals(supplierOrder.InternalOrderID),
 	).With(
 		db.InternalOrder.Product.Fetch(), 
-		db.InternalOrder.User.Fetch(), // <--- [BARU] Ambil Data User Pemilik Order
+		db.InternalOrder.User.Fetch(),
 	).Exec(ctx)
 
 	if err != nil {
@@ -191,12 +161,11 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", supplierOrder.InternalOrderID).Exec(ctx)
 
 	// --- Siapkan Data Notifikasi ---
-	
 	productName := internalOrder.Product().Name
-	productPrice := internalOrder.Product().Price
+	productPrice := internalOrder.Product().Price // Fix variable undefined
 	tujuan := internalOrder.BuyerUID 
 	supplierName := supplierMH.Name
-	tanggal := time.Now().Format("02 Jan 2006 15:04:05")
+	tanggal := time.Now().Format("2006-01-02 15:04:05")
 
 	// Kirim Telegram (Internal Log)
 	msg := fmt.Sprintf(`
@@ -204,37 +173,36 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 
 <b>User ID   :</b> %s
 <b>Produk    :</b> %s
+<b>SN / Trx  :</b> %s
 <b>Supplier  :</b> %s
 <b>Tanggal   :</b> %s
 
 <i>Ref ID: %s</i>
-`, tujuan, productName, supplierName, tanggal, supplierOrder.InternalOrderID)
+`, tujuan, productName, providerTrx, supplierName, tanggal, supplierOrder.InternalOrderID)
 
 	go sendTelegramNotification(msg)
 
-	// [UPDATE] Kirim Webhook ke URL User (Dinamis)
+	// Kirim Webhook ke User
 	user, ok := internalOrder.User() 
 	if ok && user != nil {
-		// Cek apakah user punya webhook_url (Nullable)
 		if url, okURL := user.WebhookURL(); okURL && url != "" {
-			log.Printf("🔗 Sending webhook to User: %s", url)
-			// ==========================================
-			// PENYUSUNAN PAYLOAD LENGKAP
-			// ==========================================
+			log.Printf("🔗 Sending rich webhook to User: %s", url)
+
+			// PAYLOAD LENGKAP
 			webhookPayload := map[string]interface{}{
 				"seller_id":    user.ID,
 				"message_type": "transaction_update",
 				"timestamp":    tanggal,
 				"data": map[string]interface{}{
-					"trx_id":       internalOrder.ID,          // ID Transaksi di sistem kita
-					"ref_id":       internalOrder.ID,          // Reference ID (bisa diganti client_ref_id jika ada)
-					"product_name": productName,               // Nama Produk
-					"code":         internalOrder.ProductID,   // Kode Produk / UUID
-					"price":        productPrice,              // Harga Beli
-					"status":       "success",                 // Status Transaksi
-					"status_code":  1,                         // Contoh: 1=Success, 2=Pending, 3=Failed
-					"sn":           providerTrx,               // Serial Number / Bukti Trx dari Provider
-					"destination":  tujuan,                    // No HP / User ID Game
+					"trx_id":       internalOrder.ID,
+					"ref_id":       internalOrder.ID,
+					"product_name": productName,
+					"code":         internalOrder.ProductID,
+					"price":        productPrice,
+					"status":       "success",
+					"status_code":  1,
+					"sn":           providerTrx,
+					"destination":  tujuan,
 					"message":      "Transaksi berhasil diproses",
 				},
 			}
@@ -282,27 +250,17 @@ func sendTelegramNotification(messageHTML string) {
 	http.Post(url, "application/json", bytes.NewBuffer(jsonVal))
 }
 
-// [UPDATE] Terima payload interface{} agar fleksibel mengirim JSON object apapun
 func sendWebhookCallback(targetURL string, payload interface{}) {
 	jsonVal, _ := json.Marshal(payload)
 
-	// Retry Mechanism (3x)
 	for i := 0; i < 3; i++ {
-		// Set timeout agar worker tidak hang jika server user lambat
-		client := http.Client{
-			Timeout: 10 * time.Second,
-		}
-		
+		client := http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if resp.Body != nil {
-				resp.Body.Close()
-			}
+			if resp.Body != nil { resp.Body.Close() }
 			log.Printf("✅ Webhook sent successfully to %s", targetURL)
 			return
 		}
-		
-		log.Printf("⚠️ Webhook failed (attempt %d/3): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
 	log.Printf("❌ Webhook gave up after 3 attempts")

@@ -9,6 +9,7 @@ import (
 	"gerbangapi/app/handlers"
 	"gerbangapi/app/routes"
 	"gerbangapi/app/services"
+	"gerbangapi/app/worker"
 	"gerbangapi/prisma/db"
 
 	"github.com/joho/godotenv"
@@ -55,6 +56,12 @@ func main() {
 	} else {
 		log.Println("✅ Redis Connected")
 	}
+
+	// ---------------------------------------------------------
+	// [2] START WORKER (BACKGROUND)
+	// ---------------------------------------------------------
+	// Worker akan berjalan otomatis di goroutine terpisah
+	worker.StartWorker(client, redisClient)
 
 	// 4. Create Echo Instance & Global Middleware
 	e := echo.New()
