@@ -18,6 +18,7 @@ model User {
   phone         String?
   webhook_url   String?   @map("webhook_url")
   status        String?
+  telegram_chat_id String?
   last_login    DateTime?
   
   created_at    DateTime  @default(now())

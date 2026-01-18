@@ -41,12 +41,11 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// Cari Data User berdasarkan API Key
-	// [UPDATE] Tambahkan Fetch Role di dalam relasi User
 	keyData, err := h.DB.APIKey.FindUnique(
 		db.APIKey.APIKey.Equals(apiKey),
 	).With(
 		db.APIKey.User.Fetch().With(
-			db.User.Role.Fetch(), // <--- Ambil Data Role
+			db.User.Role.Fetch(),
 		),
 	).Exec(ctx)
 
@@ -60,8 +59,11 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	phoneVal, _ := user.Phone()
 	webhookVal, _ := user.WebhookURL()
 	statusVal, _ := user.Status()
+	
+	// [BARU] Handle Nullable Telegram Chat ID
+	telegramChatID, _ := user.TelegramChatID() // <--- Ambil dari database
 
-	// [BARU] Ambil Role Name
+	// Ambil Role Name
 	roleName := "-"
 	if r, ok := user.Role(); ok {
 		roleName = r.Name
@@ -70,14 +72,15 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "Success retrieving seller profile",
 		"data": echo.Map{
-			"id":          user.ID,
-			"name":        user.Name,
-			"email":       user.Email,
-			"phone":       phoneVal,
-			"webhook_url": webhookVal,
-			"api_key":     keyData.APIKey,
-			"status":      statusVal,
-			"role_name":   roleName, // <--- Field Baru
+			"id":               user.ID,
+			"name":             user.Name,
+			"email":            user.Email,
+			"phone":            phoneVal,
+			"webhook_url":      webhookVal,
+			"telegram_chat_id": telegramChatID, // <--- Return Field Baru
+			"api_key":          keyData.APIKey,
+			"status":           statusVal,
+			"role_name":        roleName,
 		},
 	})
 }

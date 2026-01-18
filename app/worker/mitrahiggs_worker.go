@@ -20,20 +20,15 @@ import (
 var ctx = context.Background()
 
 // StartWorker memulai worker di background (Goroutine)
-// Dipanggil dari main.go
 func StartWorker(dbClient *db.PrismaClient, redisClient *redis.Client) {
 	log.Println("🚀 Starting MitraHiggs Order Worker (Background Mode)...")
 
-	// Jalankan di Goroutine agar tidak memblokir server API
 	go func() {
 		for {
 			err := processNextSupplierOrder(dbClient, redisClient)
 			if err != nil {
-				// Log error tapi worker tetap jalan
 				log.Printf("❌ Worker Error: %v", err)
 			}
-
-			// Jeda 5 detik sebelum mengecek antrian lagi
 			time.Sleep(5 * time.Second)
 		}
 	}()
@@ -155,40 +150,58 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// =================================================================
 	log.Printf("✅ Order #%s Success! Trx: %v", orderID, trxIDs)
 
-	// Update DB Success
-	providerTrx := trxIDs[0]
+	providerTrx := fmt.Sprint(trxIDs[0])
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success', provider_trx_id=? WHERE id=?", providerTrx, orderID).Exec(ctx)
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", supplierOrder.InternalOrderID).Exec(ctx)
 
 	// --- Siapkan Data Notifikasi ---
 	productName := internalOrder.Product().Name
-	productPrice := internalOrder.Product().Price // Fix variable undefined
+	productPrice := internalOrder.Product().Price
 	tujuan := internalOrder.BuyerUID 
+	tanggal := time.Now().Format("02 Jan 2006 15:04")
 	supplierName := supplierMH.Name
-	tanggal := time.Now().Format("2006-01-02 15:04:05")
 
-	// Kirim Telegram (Internal Log)
-	msg := fmt.Sprintf(`
-✅ <b>TRANSAKSI SUKSES</b>
+// --- Template Notifikasi Profesional ---
+msg := fmt.Sprintf(`
+<b>📦 TRANSAKSI BERHASIL</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+<b>Detail Produk:</b>
+🔹 %s
 
-<b>User ID   :</b> %s
-<b>Produk    :</b> %s
-<b>SN / Trx  :</b> %s
-<b>Supplier  :</b> %s
-<b>Tanggal   :</b> %s
+<b>Informasi Pengiriman:</b>
+📍 <b>Tujuan:</b> <code>%s</code>
+📑 <b>SN / TRX:</b> <code>%s</code>
+🏢 <b>Supplier:</b> %s
 
+<b>Tanggal:</b> %s
+<b>Status:</b> <pre>SUCCESS</pre>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 <i>Ref ID: %s</i>
-`, tujuan, productName, providerTrx, supplierName, tanggal, supplierOrder.InternalOrderID)
+`, productName, tujuan, providerTrx, supplierName, tanggal, supplierOrder.InternalOrderID)
 
-	go sendTelegramNotification(msg)
+	// 1. Kirim ke ADMIN (Wajib)
+	adminChatID := os.Getenv("TELEGRAM_CHAT_ID")
+	if adminChatID != "" {
+		go sendTelegramNotification(adminChatID, "<b>[ADMIN REPORT]</b>\n"+msg)
+	}
 
-	// Kirim Webhook ke User
+	// 2. Kirim ke USER (Personal) & Webhook
 	user, ok := internalOrder.User() 
 	if ok && user != nil {
+		
+		// A. Telegram Personal (Cek field telegram_chat_id di DB)
+		// Pastikan di schema.prisma sudah ada field telegram_chat_id (String?)
+		if userChatID, okID := user.TelegramChatID(); okID && userChatID != "" {
+			log.Printf("📩 Sending Telegram msg to User: %s", userChatID)
+			go sendTelegramNotification(userChatID, msg)
+		} else {
+			log.Println("⚠️ User belum menghubungkan Telegram (Chat ID kosong).")
+		}
+
+		// B. Webhook URL (Server to Server)
 		if url, okURL := user.WebhookURL(); okURL && url != "" {
 			log.Printf("🔗 Sending rich webhook to User: %s", url)
 
-			// PAYLOAD LENGKAP
 			webhookPayload := map[string]interface{}{
 				"seller_id":    user.ID,
 				"message_type": "transaction_update",
@@ -206,10 +219,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 					"message":      "Transaksi berhasil diproses",
 				},
 			}
-
 			go sendWebhookCallback(url, webhookPayload)
-		} else {
-			log.Println("⚠️ User tidak memiliki Webhook URL, skip callback.")
 		}
 	}
 
@@ -226,28 +236,45 @@ func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", reason, orderID).Exec(ctx)
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalID).Exec(ctx)
 
-	// Notif Telegram Gagal
-	msg := fmt.Sprintf("❌ <b>TRANSAKSI GAGAL</b>\n\n<b>Err:</b> %s\n<b>ID:</b> %s", reason, orderID)
-	go sendTelegramNotification(msg)
+	// Notif Telegram Gagal ke ADMIN (Sertakan Info Supplier jika memungkinkan)
+	adminChatID := os.Getenv("TELEGRAM_CHAT_ID")
+	if adminChatID != "" {
+		msg := fmt.Sprintf(`
+<b>❌ TRANSAKSI GAGAL</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+<b>ID Order:</b> <code>%s</code>
+<b>Penyebab:</b> <pre>%s</pre>
+<b>Internal ID:</b> %s
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`, orderID, reason, internalID)
+		
+		go sendTelegramNotification(adminChatID, msg)
+	}
 }
 
-func sendTelegramNotification(messageHTML string) {
+// [UPDATE] Menerima targetChatID agar dinamis (bisa ke Admin atau User)
+func sendTelegramNotification(targetChatID string, messageHTML string) {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	chatID := os.Getenv("TELEGRAM_CHAT_ID")
-
-	if botToken == "" || chatID == "" {
+	if botToken == "" || targetChatID == "" {
 		return 
 	}
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	payload := map[string]string{
-		"chat_id":    chatID,
-		"text":       messageHTML,
-		"parse_mode": "HTML",
+	payload := map[string]interface{}{
+		"chat_id":                    targetChatID,
+		"text":                       messageHTML,
+		"parse_mode":                 "HTML",
+		"disable_web_page_preview":   true, // Membuat tampilan lebih bersih
 	}
 
 	jsonVal, _ := json.Marshal(payload)
-	http.Post(url, "application/json", bytes.NewBuffer(jsonVal))
+	
+	client := http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonVal))
+	if err != nil {
+		log.Printf("⚠️ Gagal kirim Telegram: %v", err)
+		return
+	}
+	defer resp.Body.Close()
 }
 
 func sendWebhookCallback(targetURL string, payload interface{}) {

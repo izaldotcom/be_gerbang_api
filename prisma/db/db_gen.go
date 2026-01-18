@@ -85,15 +85,16 @@ datasource db {
 model User {
   id String @id @default(uuid())
 
-  role_id     String?
-  role        Role?     @relation(fields: [role_id], references: [id])
-  name        String
-  email       String    @unique
-  password    String
-  phone       String?
-  webhook_url String?   @map("webhook_url")
-  status      String?
-  last_login  DateTime?
+  role_id          String?
+  role             Role?     @relation(fields: [role_id], references: [id])
+  name             String
+  email            String    @unique
+  password         String
+  phone            String?
+  webhook_url      String?   @map("webhook_url")
+  status           String?
+  telegram_chat_id String?
+  last_login       DateTime?
 
   created_at DateTime @default(now())
   created_by String?
@@ -478,19 +479,20 @@ const (
 type UserScalarFieldEnum string
 
 const (
-	UserScalarFieldEnumID         UserScalarFieldEnum = "id"
-	UserScalarFieldEnumRoleID     UserScalarFieldEnum = "role_id"
-	UserScalarFieldEnumName       UserScalarFieldEnum = "name"
-	UserScalarFieldEnumEmail      UserScalarFieldEnum = "email"
-	UserScalarFieldEnumPassword   UserScalarFieldEnum = "password"
-	UserScalarFieldEnumPhone      UserScalarFieldEnum = "phone"
-	UserScalarFieldEnumWebhookURL UserScalarFieldEnum = "webhook_url"
-	UserScalarFieldEnumStatus     UserScalarFieldEnum = "status"
-	UserScalarFieldEnumLastLogin  UserScalarFieldEnum = "last_login"
-	UserScalarFieldEnumCreatedAt  UserScalarFieldEnum = "created_at"
-	UserScalarFieldEnumCreatedBy  UserScalarFieldEnum = "created_by"
-	UserScalarFieldEnumUpdatedAt  UserScalarFieldEnum = "updated_at"
-	UserScalarFieldEnumUpdatedBy  UserScalarFieldEnum = "updated_by"
+	UserScalarFieldEnumID             UserScalarFieldEnum = "id"
+	UserScalarFieldEnumRoleID         UserScalarFieldEnum = "role_id"
+	UserScalarFieldEnumName           UserScalarFieldEnum = "name"
+	UserScalarFieldEnumEmail          UserScalarFieldEnum = "email"
+	UserScalarFieldEnumPassword       UserScalarFieldEnum = "password"
+	UserScalarFieldEnumPhone          UserScalarFieldEnum = "phone"
+	UserScalarFieldEnumWebhookURL     UserScalarFieldEnum = "webhook_url"
+	UserScalarFieldEnumStatus         UserScalarFieldEnum = "status"
+	UserScalarFieldEnumTelegramChatID UserScalarFieldEnum = "telegram_chat_id"
+	UserScalarFieldEnumLastLogin      UserScalarFieldEnum = "last_login"
+	UserScalarFieldEnumCreatedAt      UserScalarFieldEnum = "created_at"
+	UserScalarFieldEnumCreatedBy      UserScalarFieldEnum = "created_by"
+	UserScalarFieldEnumUpdatedAt      UserScalarFieldEnum = "updated_at"
+	UserScalarFieldEnumUpdatedBy      UserScalarFieldEnum = "updated_by"
 )
 
 type RefreshTokenScalarFieldEnum string
@@ -670,16 +672,17 @@ const (
 type UserOrderByRelevanceFieldEnum string
 
 const (
-	UserOrderByRelevanceFieldEnumID         UserOrderByRelevanceFieldEnum = "id"
-	UserOrderByRelevanceFieldEnumRoleID     UserOrderByRelevanceFieldEnum = "role_id"
-	UserOrderByRelevanceFieldEnumName       UserOrderByRelevanceFieldEnum = "name"
-	UserOrderByRelevanceFieldEnumEmail      UserOrderByRelevanceFieldEnum = "email"
-	UserOrderByRelevanceFieldEnumPassword   UserOrderByRelevanceFieldEnum = "password"
-	UserOrderByRelevanceFieldEnumPhone      UserOrderByRelevanceFieldEnum = "phone"
-	UserOrderByRelevanceFieldEnumWebhookURL UserOrderByRelevanceFieldEnum = "webhook_url"
-	UserOrderByRelevanceFieldEnumStatus     UserOrderByRelevanceFieldEnum = "status"
-	UserOrderByRelevanceFieldEnumCreatedBy  UserOrderByRelevanceFieldEnum = "created_by"
-	UserOrderByRelevanceFieldEnumUpdatedBy  UserOrderByRelevanceFieldEnum = "updated_by"
+	UserOrderByRelevanceFieldEnumID             UserOrderByRelevanceFieldEnum = "id"
+	UserOrderByRelevanceFieldEnumRoleID         UserOrderByRelevanceFieldEnum = "role_id"
+	UserOrderByRelevanceFieldEnumName           UserOrderByRelevanceFieldEnum = "name"
+	UserOrderByRelevanceFieldEnumEmail          UserOrderByRelevanceFieldEnum = "email"
+	UserOrderByRelevanceFieldEnumPassword       UserOrderByRelevanceFieldEnum = "password"
+	UserOrderByRelevanceFieldEnumPhone          UserOrderByRelevanceFieldEnum = "phone"
+	UserOrderByRelevanceFieldEnumWebhookURL     UserOrderByRelevanceFieldEnum = "webhook_url"
+	UserOrderByRelevanceFieldEnumStatus         UserOrderByRelevanceFieldEnum = "status"
+	UserOrderByRelevanceFieldEnumTelegramChatID UserOrderByRelevanceFieldEnum = "telegram_chat_id"
+	UserOrderByRelevanceFieldEnumCreatedBy      UserOrderByRelevanceFieldEnum = "created_by"
+	UserOrderByRelevanceFieldEnumUpdatedBy      UserOrderByRelevanceFieldEnum = "updated_by"
 )
 
 type RefreshTokenOrderByRelevanceFieldEnum string
@@ -851,6 +854,8 @@ const userFieldPhone userPrismaFields = "phone"
 const userFieldWebhookURL userPrismaFields = "webhook_url"
 
 const userFieldStatus userPrismaFields = "status"
+
+const userFieldTelegramChatID userPrismaFields = "telegram_chat_id"
 
 const userFieldLastLogin userPrismaFields = "last_login"
 
@@ -1867,36 +1872,38 @@ type UserModel struct {
 
 // InnerUser holds the actual data
 type InnerUser struct {
-	ID         string    `json:"id"`
-	RoleID     *string   `json:"role_id,omitempty"`
-	Name       string    `json:"name"`
-	Email      string    `json:"email"`
-	Password   string    `json:"password"`
-	Phone      *string   `json:"phone,omitempty"`
-	WebhookURL *string   `json:"webhook_url,omitempty"`
-	Status     *string   `json:"status,omitempty"`
-	LastLogin  *DateTime `json:"last_login,omitempty"`
-	CreatedAt  DateTime  `json:"created_at"`
-	CreatedBy  *string   `json:"created_by,omitempty"`
-	UpdatedAt  DateTime  `json:"updated_at"`
-	UpdatedBy  *string   `json:"updated_by,omitempty"`
+	ID             string    `json:"id"`
+	RoleID         *string   `json:"role_id,omitempty"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	Password       string    `json:"password"`
+	Phone          *string   `json:"phone,omitempty"`
+	WebhookURL     *string   `json:"webhook_url,omitempty"`
+	Status         *string   `json:"status,omitempty"`
+	TelegramChatID *string   `json:"telegram_chat_id,omitempty"`
+	LastLogin      *DateTime `json:"last_login,omitempty"`
+	CreatedAt      DateTime  `json:"created_at"`
+	CreatedBy      *string   `json:"created_by,omitempty"`
+	UpdatedAt      DateTime  `json:"updated_at"`
+	UpdatedBy      *string   `json:"updated_by,omitempty"`
 }
 
 // RawUserModel is a struct for User when used in raw queries
 type RawUserModel struct {
-	ID         RawString    `json:"id"`
-	RoleID     *RawString   `json:"role_id,omitempty"`
-	Name       RawString    `json:"name"`
-	Email      RawString    `json:"email"`
-	Password   RawString    `json:"password"`
-	Phone      *RawString   `json:"phone,omitempty"`
-	WebhookURL *RawString   `json:"webhook_url,omitempty"`
-	Status     *RawString   `json:"status,omitempty"`
-	LastLogin  *RawDateTime `json:"last_login,omitempty"`
-	CreatedAt  RawDateTime  `json:"created_at"`
-	CreatedBy  *RawString   `json:"created_by,omitempty"`
-	UpdatedAt  RawDateTime  `json:"updated_at"`
-	UpdatedBy  *RawString   `json:"updated_by,omitempty"`
+	ID             RawString    `json:"id"`
+	RoleID         *RawString   `json:"role_id,omitempty"`
+	Name           RawString    `json:"name"`
+	Email          RawString    `json:"email"`
+	Password       RawString    `json:"password"`
+	Phone          *RawString   `json:"phone,omitempty"`
+	WebhookURL     *RawString   `json:"webhook_url,omitempty"`
+	Status         *RawString   `json:"status,omitempty"`
+	TelegramChatID *RawString   `json:"telegram_chat_id,omitempty"`
+	LastLogin      *RawDateTime `json:"last_login,omitempty"`
+	CreatedAt      RawDateTime  `json:"created_at"`
+	CreatedBy      *RawString   `json:"created_by,omitempty"`
+	UpdatedAt      RawDateTime  `json:"updated_at"`
+	UpdatedBy      *RawString   `json:"updated_by,omitempty"`
 }
 
 // RelationsUser holds the relation data separately
@@ -1940,6 +1947,13 @@ func (r UserModel) Status() (value String, ok bool) {
 		return value, false
 	}
 	return *r.InnerUser.Status, true
+}
+
+func (r UserModel) TelegramChatID() (value String, ok bool) {
+	if r.InnerUser.TelegramChatID == nil {
+		return value, false
+	}
+	return *r.InnerUser.TelegramChatID, true
 }
 
 func (r UserModel) LastLogin() (value DateTime, ok bool) {
@@ -2780,6 +2794,11 @@ type userQuery struct {
 	//
 	// @optional
 	Status userQueryStatusString
+
+	// TelegramChatID
+	//
+	// @optional
+	TelegramChatID userQueryTelegramChatIDString
 
 	// LastLogin
 	//
@@ -5911,6 +5930,398 @@ func (r userQueryStatusString) HasSuffixIfPresent(value *string) userDefaultPara
 
 func (r userQueryStatusString) Field() userPrismaFields {
 	return userFieldStatus
+}
+
+// base struct
+type userQueryTelegramChatIDString struct{}
+
+// Set the optional value of TelegramChatID
+func (r userQueryTelegramChatIDString) Set(value string) userSetParam {
+
+	return userSetParam{
+		data: builder.Field{
+			Name:  "telegram_chat_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of TelegramChatID dynamically
+func (r userQueryTelegramChatIDString) SetIfPresent(value *String) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of TelegramChatID dynamically
+func (r userQueryTelegramChatIDString) SetOptional(value *String) userSetParam {
+	if value == nil {
+
+		var v *string
+		return userSetParam{
+			data: builder.Field{
+				Name:  "telegram_chat_id",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r userQueryTelegramChatIDString) Equals(value string) userWithPrismaTelegramChatIDEqualsParam {
+
+	return userWithPrismaTelegramChatIDEqualsParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) EqualsIfPresent(value *string) userWithPrismaTelegramChatIDEqualsParam {
+	if value == nil {
+		return userWithPrismaTelegramChatIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r userQueryTelegramChatIDString) EqualsOptional(value *String) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) IsNull() userDefaultParam {
+	var str *string = nil
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) Order(direction SortOrder) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name:  "telegram_chat_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) Cursor(cursor string) userCursorParam {
+	return userCursorParam{
+		data: builder.Field{
+			Name:  "telegram_chat_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) In(value []string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) InIfPresent(value []string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r userQueryTelegramChatIDString) NotIn(value []string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) NotInIfPresent(value []string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r userQueryTelegramChatIDString) Lt(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) LtIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r userQueryTelegramChatIDString) Lte(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) LteIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r userQueryTelegramChatIDString) Gt(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) GtIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r userQueryTelegramChatIDString) Gte(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) GteIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r userQueryTelegramChatIDString) Contains(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) ContainsIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r userQueryTelegramChatIDString) StartsWith(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) StartsWithIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r userQueryTelegramChatIDString) EndsWith(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) EndsWithIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r userQueryTelegramChatIDString) Search(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) SearchIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r userQueryTelegramChatIDString) Not(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTelegramChatIDString) NotIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r userQueryTelegramChatIDString) HasPrefix(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r userQueryTelegramChatIDString) HasPrefixIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r userQueryTelegramChatIDString) HasSuffix(value string) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "telegram_chat_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r userQueryTelegramChatIDString) HasSuffixIfPresent(value *string) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r userQueryTelegramChatIDString) Field() userPrismaFields {
+	return userFieldTelegramChatID
 }
 
 // base struct
@@ -45815,6 +46226,7 @@ var userOutput = []builder.Output{
 	{Name: "phone"},
 	{Name: "webhook_url"},
 	{Name: "status"},
+	{Name: "telegram_chat_id"},
 	{Name: "last_login"},
 	{Name: "created_at"},
 	{Name: "created_by"},
@@ -46687,6 +47099,84 @@ func (p userWithPrismaStatusEqualsUniqueParam) statusField() {}
 
 func (userWithPrismaStatusEqualsUniqueParam) unique() {}
 func (userWithPrismaStatusEqualsUniqueParam) equals() {}
+
+type UserWithPrismaTelegramChatIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	telegramChatIDField()
+}
+
+type UserWithPrismaTelegramChatIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	telegramChatIDField()
+}
+
+type userWithPrismaTelegramChatIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTelegramChatIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTelegramChatIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTelegramChatIDSetParam) userModel() {}
+
+func (p userWithPrismaTelegramChatIDSetParam) telegramChatIDField() {}
+
+type UserWithPrismaTelegramChatIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	telegramChatIDField()
+}
+
+type userWithPrismaTelegramChatIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTelegramChatIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTelegramChatIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTelegramChatIDEqualsParam) userModel() {}
+
+func (p userWithPrismaTelegramChatIDEqualsParam) telegramChatIDField() {}
+
+func (userWithPrismaTelegramChatIDSetParam) settable()  {}
+func (userWithPrismaTelegramChatIDEqualsParam) equals() {}
+
+type userWithPrismaTelegramChatIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTelegramChatIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTelegramChatIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTelegramChatIDEqualsUniqueParam) userModel()           {}
+func (p userWithPrismaTelegramChatIDEqualsUniqueParam) telegramChatIDField() {}
+
+func (userWithPrismaTelegramChatIDEqualsUniqueParam) unique() {}
+func (userWithPrismaTelegramChatIDEqualsUniqueParam) equals() {}
 
 type UserWithPrismaLastLoginEqualsSetParam interface {
 	field() builder.Field

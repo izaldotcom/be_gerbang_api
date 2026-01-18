@@ -37,15 +37,16 @@ type TokenResponse struct {
 }
 
 type UserSession struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Email      string `json:"email"`
-	Phone      string `json:"phone"`
-	RoleID     string `json:"role_id"`
-	RoleName   string `json:"role_name"`
-	Status     string `json:"status"`
-	ApiKey     string `json:"api_key"`
-	WebhookURL string `json:"webhook_url"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	Phone          string `json:"phone"`
+	RoleID         string `json:"role_id"`
+	RoleName       string `json:"role_name"`
+	Status         string `json:"status"`
+	ApiKey         string `json:"api_key"`
+	WebhookURL     string `json:"webhook_url"`
+	TelegramChatID string `json:"telegram_chat_id"` // <--- Tambahkan baris ini
 }
 
 type JwtClaims struct {
@@ -213,6 +214,10 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	webhookVal := ""
 	if v, ok := user.WebhookURL(); ok { webhookVal = v }
 
+	// [BARU] Ambil Telegram Chat ID dari Database
+	telegramChatIDVal := ""
+	if v, ok := user.TelegramChatID(); ok { telegramChatIDVal = v }
+
 	roleVal := ""
 	if v, ok := user.RoleID(); ok { roleVal = v }
 
@@ -225,7 +230,6 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	if apiKeys := user.APIKeys(); len(apiKeys) > 0 {
 		for _, key := range apiKeys {
 			if key.IsActive {
-				// [FIXED] Gunakan APIKey (Huruf Besar Semua)
 				userApiKey = key.APIKey 
 				break
 			}
@@ -233,15 +237,16 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 	}
 
 	userSession := UserSession{
-		ID:       user.ID,
-		Name:     user.Name,
-		Email:    user.Email,
-		Phone:    phoneVal,
-		RoleID:   roleVal,
-		RoleName: roleNameVal,
-		Status:   statusVal,
-		ApiKey:   userApiKey,
-		WebhookURL: webhookVal,
+		ID:             user.ID,
+		Name:           user.Name,
+		Email:          user.Email,
+		Phone:          phoneVal,
+		RoleID:         roleVal,
+		RoleName:       roleNameVal,
+		Status:         statusVal,
+		ApiKey:         userApiKey,
+		WebhookURL:     webhookVal,
+		TelegramChatID: telegramChatIDVal, // [BARU] Tambahkan ke struct session
 	}
 
 	jsonData, _ := json.Marshal(userSession)

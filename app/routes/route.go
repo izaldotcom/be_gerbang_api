@@ -18,6 +18,7 @@ func Init(
 	supplierProductHandler *handlers.SupplierProductHandler,
 	productHandler *handlers.ProductHandler,
 	recipeHandler *handlers.RecipeHandler,
+	telegramHandler *handlers.TelegramHandler, // Tambahan TelegramHandler
 ) {
 	// Grouping v1
 	v1 := e.Group("/api/v1")
@@ -31,7 +32,10 @@ func Init(
 	
 	// Note: Verify & GetUsers sebaiknya diproteksi middleware admin kedepannya
 	v1.POST("/verify", authHandler.VerifyUser) 
-	v1.GET("/users", authHandler.GetUsers)     
+	v1.GET("/users", authHandler.GetUsers) 
+
+	// [BARU] Route untuk Telegram Webhook
+	v1.POST("/webhook/telegram", telegramHandler.HandleWebhook)
 
 	// ==========================================
 	// B. PROTECTED ROUTES (Butuh Bearer Token)

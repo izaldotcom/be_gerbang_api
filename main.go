@@ -44,7 +44,7 @@ func main() {
 		redisAddr = "localhost:6379" // Default address
 	}
 
-	// [BARU] Ambil password dari .env
+	// Ambil password dari .env untuk production
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 
 	redisClient := redis.NewClient(&redis.Options{
@@ -63,7 +63,7 @@ func main() {
 	// ---------------------------------------------------------
 	// [2] START WORKER (BACKGROUND)
 	// ---------------------------------------------------------
-	// Worker akan berjalan otomatis di goroutine terpisah
+	// Worker berjalan otomatis di goroutine terpisah untuk memantau order
 	worker.StartWorker(client, redisClient)
 
 	// 4. Create Echo Instance & Global Middleware
@@ -84,6 +84,9 @@ func main() {
 	// B. Handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	sellerHandler := handlers.NewSellerHandler(client, orderService, redisClient)
+	
+	// [BARU] Inisialisasi Telegram Handler untuk Deep Linking
+	telegramHandler := handlers.NewTelegramHandler(client) 
 
 	// CRUD Handlers
 	supplierHandler := handlers.NewSupplierHandler(client)
@@ -103,6 +106,7 @@ func main() {
 		supplierProductHandler,
 		productHandler,
 		recipeHandler,
+		telegramHandler, // Hanya TelegramHandler yang ditambahkan
 	)
 
 	// 7. Start Server
