@@ -44,10 +44,13 @@ func main() {
 		redisAddr = "localhost:6379" // Default address
 	}
 
+	// [BARU] Ambil password dari .env
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Password: redisPassword,
+		DB:       0,
 	})
 
 	// Cek koneksi Redis
