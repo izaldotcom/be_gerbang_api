@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os" // [ADDED] Perlu import os untuk cek folder driver
 	"strings"
 	"time"
 
 	"github.com/playwright-community/playwright-go"
-	"github.com/redis/go-redis/v9" // [FIX] Import Redis
+	"github.com/redis/go-redis/v9"
 )
 
 type MitraHiggsService struct {
@@ -18,7 +19,7 @@ type MitraHiggsService struct {
 	Context  playwright.BrowserContext
 	Page     playwright.Page
 	RedisKey string
-	Redis    *redis.Client // [FIX] Tambahkan field Redis Client
+	Redis    *redis.Client
 }
 
 type SerializableCookie struct {
@@ -32,15 +33,34 @@ type SerializableCookie struct {
 	SameSite string  `json:"same_site"`
 }
 
-// [FIX] Constructor menerima redisClient
+// [FIXED] Constructor dengan Smart Driver Detection
 func NewMitraHiggsService(isDebug bool, redisClient *redis.Client) (*MitraHiggsService, error) {
-	pw, err := playwright.Run()
+	// --- LOGIC TAMBAHAN UNTUK SERVER UBUNTU ---
+	// Path driver yang kita install manual di /opt
+	serverDriverPath := "/opt/playwright/ms-playwright-go/1.52.0"
+	
+	var runOptions *playwright.RunOptions
+
+	// Cek apakah folder driver server ada?
+	if _, err := os.Stat(serverDriverPath); err == nil {
+		// Jika ada (di Server), gunakan path ini
+		log.Println("🖥️  Terdeteksi lingkungan Server: Menggunakan Custom Driver Path:", serverDriverPath)
+		runOptions = &playwright.RunOptions{
+			DriverDirectory: serverDriverPath,
+		}
+	} else {
+		// Jika tidak ada (di Laptop/Lokal), biarkan default (nil)
+		log.Println("💻 Terdeteksi lingkungan Lokal: Menggunakan Default Driver Path")
+	}
+	// -------------------------------------------
+
+	// Jalankan Playwright dengan opsi yang sudah ditentukan
+	pw, err := playwright.Run(runOptions)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gagal start playwright: %v", err)
 	}
 
-	// OPTIMASI 1: HEADLESS TRUE & CHROMIUM ARGS
-	// Menggunakan headless agar tidak merender UI (lebih cepat & ringan CPU)
+	// OPTIMASI: Headless & Args
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(!isDebug),
 		Args: []string{
@@ -51,7 +71,7 @@ func NewMitraHiggsService(isDebug bool, redisClient *redis.Client) (*MitraHiggsS
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gagal launch browser: %v", err)
 	}
 
 	// Setup Mobile View
@@ -59,12 +79,12 @@ func NewMitraHiggsService(isDebug bool, redisClient *redis.Client) (*MitraHiggsS
 		UserAgent: playwright.String("Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36"),
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gagal buat context: %v", err)
 	}
 
 	page, err := ctx.NewPage()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gagal buat page: %v", err)
 	}
 
 	if err := page.SetViewportSize(375, 812); err != nil {
@@ -77,7 +97,7 @@ func NewMitraHiggsService(isDebug bool, redisClient *redis.Client) (*MitraHiggsS
 		Context:  ctx,
 		Page:     page,
 		RedisKey: "mitrahiggs:cookies",
-		Redis:    redisClient, // [FIX] Simpan instance redis
+		Redis:    redisClient,
 	}, nil
 }
 
@@ -108,17 +128,13 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	})
 
 	// 1. CEK & PINDAH KE ID LOGIN
-	// Cek visibilitas dengan timeout sangat singkat
 	isPasswordVisible := false
 	if vis, _ := s.Page.Locator("input[type='password']").IsVisible(); vis {
 		isPasswordVisible = true
 	}
 
 	if !isPasswordVisible {
-		// Klik "ID Login"
 		s.Page.Locator("span[name='index-html-id-login']").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
-
-		// Fallback klik text jika span gagal
 		if vis, _ := s.Page.Locator("input[type='password']").IsVisible(); !vis {
 			s.Page.Locator(".login-text").Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 		}
@@ -135,9 +151,8 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	}
 
 	// 4. VERIFIKASI SUKSES
-	// Tunggu redirect
 	err = s.Page.WaitForURL("**/trade/index**", playwright.PageWaitForURLOptions{
-		Timeout: playwright.Float(15000), // Timeout dipercepat
+		Timeout: playwright.Float(15000),
 	})
 
 	if err != nil {
@@ -145,14 +160,12 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 			msg, _ := s.Page.Locator(".alert-danger").TextContent()
 			return fmt.Errorf("login ditolak: %s", msg)
 		}
-		// OPTIMASI 2: HAPUS SCREENSHOT
 		return fmt.Errorf("login timeout/gagal")
 	}
 
 	log.Println("✅ Login Sukses.")
 
-	// 5. TUTUP POPUP (REQUEST KHUSUS)
-	// Gunakan JS Inject langsung untuk menutup, lebih cepat daripada menunggu animasi klik
+	// 5. TUTUP POPUP
 	s.Page.Evaluate(`
     try { 
       hideInvitation(); 
@@ -164,7 +177,6 @@ func (s *MitraHiggsService) Login(gameID, password string) error {
 	cookies, _ := s.Context.Cookies()
 	cookieBytes, _ := json.Marshal(cookies)
 
-	// [FIX] Gunakan s.Redis.Set (bukan db.Rdb)
 	err = s.Redis.Set(ctx, s.RedisKey, string(cookieBytes), 24*time.Hour).Err()
 	if err != nil {
 		log.Println("⚠️ Warning: Gagal simpan cookie ke Redis:", err)
@@ -179,66 +191,47 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 
 	s.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{State: playwright.LoadStateDomcontentloaded})
 
-	// Handle Popup Awal (Agresif via JS)
+	// Handle Popup Awal
 	s.Page.Evaluate("try { hideInvitation(); Common.close(); } catch(e) {}")
 
 	var successTrx []string
 
-	// ============================================================
-	// MULAI LOOPING TRANSAKSI
-	// ============================================================
 	for i := 1; i <= quantity; i++ {
-		// OPTIMASI: Logging dipersingkat agar tidak spam buffer console berlebihan
 		if i == 1 || i%5 == 0 {
 			log.Printf("🔄 Loop %d/%d...", i, quantity)
 		}
 
 		// A. BERSIHKAN POPUP
 		s.Page.Evaluate("try { Common.close(); } catch(e) {}")
-		// Sleep dikurangi: 800ms -> 200ms (cukup untuk JS eksekusi close)
 		time.Sleep(200 * time.Millisecond)
 
-		// ============================================================
-		// LANGKAH 2: PILIH PRODUK
-		// ============================================================
+		// B. PILIH PRODUK
 		itemSelector := fmt.Sprintf("#itemId_%s", productID)
 
-		// Cek keberadaan elemen (Fail Fast)
 		if count, _ := s.Page.Locator(itemSelector).Count(); count == 0 {
 			return "", fmt.Errorf("produk %s tidak ditemukan", itemSelector)
 		}
 
-		// Cek Stok (Fail Fast)
 		stockSelector := fmt.Sprintf("%s .itemPriceLabel", itemSelector)
 		if txt, _ := s.Page.Locator(stockSelector).InnerText(); strings.TrimSpace(txt) == "0" {
 			return "", fmt.Errorf("stok habis saat loop ke-%d", i)
 		}
 
-		// Klik Produk
 		err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{
 			Force: playwright.Bool(true),
 		})
 		if err != nil {
 			return "", fmt.Errorf("gagal klik produk loop %d: %v", i, err)
 		}
-
-		// Jeda dikurangi: 800ms -> 300ms (Cukup untuk highlight item terpilih)
 		time.Sleep(300 * time.Millisecond)
 
-		// ============================================================
-		// LANGKAH 3: INPUT ID PLAYER
-		// ============================================================
+		// C. INPUT ID PLAYER
 		inputSelector := "#buyerId"
-
-		// Cek nilai saat ini untuk menghindari pengetikan ulang
 		currentVal, _ := s.Page.Locator(inputSelector).InputValue()
 
 		if currentVal != playerID {
 			s.Page.Locator(inputSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 			s.Page.Locator(inputSelector).Fill("")
-
-			// OPTIMASI 3: PERCEPAT PENGETIKAN
-			// Delay 20ms sudah cukup aman untuk menipu validasi regex, 100ms terlalu lama.
 			err = s.Page.Locator(inputSelector).Type(playerID, playwright.LocatorTypeOptions{
 				Delay: playwright.Float(20),
 			})
@@ -247,28 +240,20 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 			}
 		}
 
-		// ============================================================
-		// LANGKAH 4: PROSES TRANSAKSI
-		// ============================================================
-
-		// Trigger Query via JS (Lebih cepat daripada cari tombol Query lalu klik)
+		// D. PROSES TRANSAKSI
 		s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) {}")
 
-		// Tunggu Modal Konfirmasi
 		modalSelector := "#queryBuyerName"
 		modalAppeared := false
 
-		// Loop cek modal (Max 3 detik)
 		for tryCount := 0; tryCount < 15; tryCount++ {
 			if vis, _ := s.Page.Locator(modalSelector).IsVisible(); vis {
-				// Cek teks inner untuk memastikan data sudah load
 				if txt, _ := s.Page.Locator(modalSelector).InnerText(); txt != "" {
 					modalAppeared = true
 					break
 				}
 			}
 
-			// Cek Error Cepat
 			if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
 				txt, _ := s.Page.Locator("#publicTxt").InnerText()
 				if txt != "" && txt != "null" && !strings.Contains(txt, "Berhasil") {
@@ -280,14 +265,11 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 		}
 
 		if !modalAppeared {
-			// OPTIMASI: Hapus Screenshot debug
 			return "", fmt.Errorf("timeout: modal konfirmasi tidak muncul loop %d", i)
 		}
 
-		// Jeda sedikit agar tombol konfirmasi clickable
 		time.Sleep(500 * time.Millisecond)
 
-		// KLIK KONFIRMASI (RETRY MECHANISM)
 		confirmSelector := "a[onclick*='Index.sellItem']"
 		transactionConfirmed := false
 
@@ -296,9 +278,8 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 				s.Page.Locator(confirmSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
 			}
 
-			// Tunggu Respon (Maks 3 detik)
 			for waitTick := 0; waitTick < 10; waitTick++ {
-				time.Sleep(300 * time.Millisecond) // Cek setiap 300ms
+				time.Sleep(300 * time.Millisecond)
 
 				if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
 					resultText, _ := s.Page.Locator("#publicTxt").InnerText()
@@ -318,16 +299,12 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 		}
 
 		if !transactionConfirmed {
-			// OPTIMASI: Hapus Screenshot debug
 			return "", fmt.Errorf("loop %d: tombol diklik tapi tidak ada respon", i)
 		}
 
 		trxID := fmt.Sprintf("TRX-%d-%d", time.Now().Unix(), i)
 		successTrx = append(successTrx, trxID)
 
-		// OPTIMASI 4: KURANGI WAKTU TUNGGU ANTAR TRANSAKSI
-		// Dari 2000ms -> 800ms. Popup sukses akan ditutup paksa oleh
-		// 'Common.close()' di awal loop berikutnya.
 		time.Sleep(800 * time.Millisecond)
 	}
 
