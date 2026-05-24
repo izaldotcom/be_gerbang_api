@@ -126,9 +126,14 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	log.Println("⏳ Waiting for browser page load...")
 	time.Sleep(5 * time.Second) 
 
-	// Login
-	mhUsername := os.Getenv("MH_USERNAME")
-	mhPassword := os.Getenv("MH_PASSWORD")
+	// Mengambil Username dan Password dari database[cite: 6]
+	mhUsername, okUser := supplierMH.Username()
+	mhPassword, okPass := supplierMH.Password()
+	
+	if !okUser || !okPass || mhUsername == "" || mhPassword == "" {
+		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Kredensial Supplier Belum Diset di Database")
+		return nil
+	}
 
 	log.Println("🔑 Logging in...")
 	if err := svc.Login(mhUsername, mhPassword); err != nil {

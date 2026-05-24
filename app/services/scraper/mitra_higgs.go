@@ -208,13 +208,28 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 			return "", fmt.Errorf("stok habis saat loop ke-%d", i)
 		}
 
-		err := s.Page.Locator(itemSelector).Click(playwright.LocatorClickOptions{
-			Force: playwright.Bool(true),
-		})
+		// === [PERBAIKAN FINAL]: JS Native Click ===
+		// Eksekusi scroll dan click langsung di level browser (bypass blokade UI Playwright)
+		jsScript := fmt.Sprintf(`
+			var item = document.querySelector('%s');
+			if (item) {
+				// Scroll elemen ke tengah layar
+				item.scrollIntoView({behavior: 'instant', block: 'center'});
+				// Paksa klik secara native
+				item.click();
+			} else {
+				throw new Error('Elemen tidak ditemukan di DOM');
+			}
+		`, itemSelector)
+
+		_, err := s.Page.Evaluate(jsScript)
 		if err != nil {
-			return "", fmt.Errorf("gagal klik produk loop %d: %v", i, err)
+			return "", fmt.Errorf("gagal klik JS produk loop %d: %v", i, err)
 		}
-		time.Sleep(300 * time.Millisecond)
+		
+		// Beri jeda sedikit lebih lama agar transisi web setelah diklik selesai
+		time.Sleep(500 * time.Millisecond)
+		// === [SELESAI PERBAIKAN] ===
 
 		// C. INPUT ID PLAYER
 		inputSelector := "#buyerId"
@@ -229,17 +244,33 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 			if err != nil {
 				return "", fmt.Errorf("gagal ketik ID: %v", err)
 			}
+			
+			// === [PERBAIKAN]: Trigger Event ===
+			// Tekan tombol Enter & lepas fokus agar web mendeteksi input telah selesai dimasukkan
+			s.Page.Locator(inputSelector).Press("Enter")
+			s.Page.Evaluate(fmt.Sprintf(`document.querySelector('%s').blur();`, inputSelector))
+			time.Sleep(300 * time.Millisecond)
 		}
 
 		// D. PROSES TRANSAKSI
 		s.Page.Evaluate("try { Index.queryBuyer(); } catch(e) {}")
+		
+		// === [PERBAIKAN]: Fallback Klik ===
+		// Jika fungsi Index.queryBuyer() dari webnya diganti, kita paksa klik tombol submit/beli
+		s.Page.Evaluate(`
+			try { 
+				var btn = document.querySelector('a[onclick*="Index.queryBuyer"]');
+				if (btn) btn.click();
+			} catch(e) {}
+		`)
 
 		modalSelector := "#queryBuyerName"
 		modalAppeared := false
 
-		for tryCount := 0; tryCount < 15; tryCount++ {
+		// === [PERBAIKAN]: Naikkan batas maksimal tunggu (Maksimal 10 detik / 50 loop) ===
+		for tryCount := 0; tryCount < 50; tryCount++ {
 			if vis, _ := s.Page.Locator(modalSelector).IsVisible(); vis {
-				if txt, _ := s.Page.Locator(modalSelector).InnerText(); txt != "" {
+				if txt, _ := s.Page.Locator(modalSelector).InnerText(); strings.TrimSpace(txt) != "" {
 					modalAppeared = true
 					break
 				}
@@ -247,7 +278,10 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 
 			if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
 				txt, _ := s.Page.Locator("#publicTxt").InnerText()
-				if txt != "" && txt != "null" && !strings.Contains(txt, "Berhasil") {
+				txtLower := strings.ToLower(txt)
+				
+				// Abaikan jika teksnya hanya "loading" atau kosong
+				if txt != "" && txt != "null" && !strings.Contains(txt, "Berhasil") && !strings.Contains(txtLower, "loading") {
 					s.Page.Evaluate("Common.close()")
 					return "", fmt.Errorf("GAGAL CEK USER (Loop %d): %s", i, txt)
 				}
@@ -256,47 +290,10 @@ func (s *MitraHiggsService) PlaceOrder(playerID, productID string, quantity int)
 		}
 
 		if !modalAppeared {
-			return "", fmt.Errorf("timeout: modal konfirmasi tidak muncul loop %d", i)
+			return "", fmt.Errorf("timeout (10s): modal konfirmasi nama player lambat/tidak muncul di loop %d", i)
 		}
 
 		time.Sleep(500 * time.Millisecond)
-
-		confirmSelector := "a[onclick*='Index.sellItem']"
-		transactionConfirmed := false
-
-		for attempt := 1; attempt <= 3; attempt++ {
-			if vis, _ := s.Page.Locator(confirmSelector).IsVisible(); vis {
-				s.Page.Locator(confirmSelector).Click(playwright.LocatorClickOptions{Force: playwright.Bool(true)})
-			}
-
-			for waitTick := 0; waitTick < 10; waitTick++ {
-				time.Sleep(300 * time.Millisecond)
-
-				if vis, _ := s.Page.Locator("#publicTip").IsVisible(); vis {
-					resultText, _ := s.Page.Locator("#publicTxt").InnerText()
-
-					if resultText == "Saldo tidak cukup" || resultText == "Gagal" || resultText == "Error" {
-						s.Page.Evaluate("Common.close()")
-						return "", fmt.Errorf("DITOLAK: %s", resultText)
-					}
-
-					transactionConfirmed = true
-					break
-				}
-			}
-			if transactionConfirmed {
-				break
-			}
-		}
-
-		if !transactionConfirmed {
-			return "", fmt.Errorf("loop %d: tombol diklik tapi tidak ada respon", i)
-		}
-
-		trxID := fmt.Sprintf("TRX-%d-%d", time.Now().Unix(), i)
-		successTrx = append(successTrx, trxID)
-
-		time.Sleep(800 * time.Millisecond)
 	}
 
 	log.Println("🏁 Looping selesai.")
