@@ -66,6 +66,7 @@ func Init(
 	protected.GET("/supplier-products", supplierProductHandler.GetAll)
 	protected.PUT("/supplier-products/:id", supplierProductHandler.Update)
 	protected.DELETE("/supplier-products/:id", supplierProductHandler.Delete)
+	protected.POST("/suppliers/check-connection", supplierHandler.CheckConnection)
 
 	// --- 6. Recipe Items (CRUD DETAIL) ---
 	protected.POST("/recipes", recipeHandler.Create)

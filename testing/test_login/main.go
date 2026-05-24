@@ -14,8 +14,8 @@ import (
 func main() {
 	// 1. Load Env
 	// Sesuaikan path ini dengan lokasi file .env Anda relatif terhadap file ini
-	if err := godotenv.Load("../../.env"); err != nil {
-		log.Println("⚠️ Warning: Tidak bisa load .env, mencoba default system env...")
+	if err := godotenv.Load(".env"); err != nil {
+			log.Println("⚠️ Warning: Tidak bisa load .env, mencoba default system env...")
 	}
 
 	log.Println("🧪 TESTING: Memulai Browser (Visual Mode)...")

@@ -89,7 +89,7 @@ func main() {
 	telegramHandler := handlers.NewTelegramHandler(client) 
 
 	// CRUD Handlers
-	supplierHandler := handlers.NewSupplierHandler(client)
+	supplierHandler := handlers.NewSupplierHandler(client, redisClient)
 	supplierProductHandler := handlers.NewSupplierProductHandler(client)
 	productHandler := handlers.NewProductHandler(client)
 	recipeHandler := handlers.NewRecipeHandler(client)

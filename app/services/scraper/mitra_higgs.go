@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os" // [ADDED] Perlu import os untuk cek folder driver
+	"os"
 	"strings"
 	"time"
 
@@ -35,26 +35,17 @@ type SerializableCookie struct {
 
 // [FIXED] Constructor dengan Smart Driver Detection
 func NewMitraHiggsService(isDebug bool, redisClient *redis.Client) (*MitraHiggsService, error) {
-	// --- LOGIC TAMBAHAN UNTUK SERVER UBUNTU ---
-	// Path driver yang kita install manual di /opt
 	serverDriverPath := "/opt/playwright/ms-playwright-go/1.52.0"
 	
-	var runOptions *playwright.RunOptions
+	runOptions := &playwright.RunOptions{}
 
-	// Cek apakah folder driver server ada?
 	if _, err := os.Stat(serverDriverPath); err == nil {
-		// Jika ada (di Server), gunakan path ini
 		log.Println("🖥️  Terdeteksi lingkungan Server: Menggunakan Custom Driver Path:", serverDriverPath)
-		runOptions = &playwright.RunOptions{
-			DriverDirectory: serverDriverPath,
-		}
+		runOptions.DriverDirectory = serverDriverPath
 	} else {
-		// Jika tidak ada (di Laptop/Lokal), biarkan default (nil)
 		log.Println("💻 Terdeteksi lingkungan Lokal: Menggunakan Default Driver Path")
 	}
-	// -------------------------------------------
 
-	// Jalankan Playwright dengan opsi yang sudah ditentukan
 	pw, err := playwright.Run(runOptions)
 	if err != nil {
 		return nil, fmt.Errorf("gagal start playwright: %v", err)

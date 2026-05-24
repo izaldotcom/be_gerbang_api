@@ -141,6 +141,8 @@ model APIKey {
 model Supplier {
   id         String   @id @default(uuid())
   name       String
+  username   String?
+  password   String?
   code       String   @default("DEFAULT")
   type       String
   base_url   String?
@@ -524,6 +526,8 @@ type SupplierScalarFieldEnum string
 const (
 	SupplierScalarFieldEnumID        SupplierScalarFieldEnum = "id"
 	SupplierScalarFieldEnumName      SupplierScalarFieldEnum = "name"
+	SupplierScalarFieldEnumUsername  SupplierScalarFieldEnum = "username"
+	SupplierScalarFieldEnumPassword  SupplierScalarFieldEnum = "password"
 	SupplierScalarFieldEnumCode      SupplierScalarFieldEnum = "code"
 	SupplierScalarFieldEnumType      SupplierScalarFieldEnum = "type"
 	SupplierScalarFieldEnumBaseURL   SupplierScalarFieldEnum = "base_url"
@@ -706,11 +710,13 @@ const (
 type SupplierOrderByRelevanceFieldEnum string
 
 const (
-	SupplierOrderByRelevanceFieldEnumID      SupplierOrderByRelevanceFieldEnum = "id"
-	SupplierOrderByRelevanceFieldEnumName    SupplierOrderByRelevanceFieldEnum = "name"
-	SupplierOrderByRelevanceFieldEnumCode    SupplierOrderByRelevanceFieldEnum = "code"
-	SupplierOrderByRelevanceFieldEnumType    SupplierOrderByRelevanceFieldEnum = "type"
-	SupplierOrderByRelevanceFieldEnumBaseURL SupplierOrderByRelevanceFieldEnum = "base_url"
+	SupplierOrderByRelevanceFieldEnumID       SupplierOrderByRelevanceFieldEnum = "id"
+	SupplierOrderByRelevanceFieldEnumName     SupplierOrderByRelevanceFieldEnum = "name"
+	SupplierOrderByRelevanceFieldEnumUsername SupplierOrderByRelevanceFieldEnum = "username"
+	SupplierOrderByRelevanceFieldEnumPassword SupplierOrderByRelevanceFieldEnum = "password"
+	SupplierOrderByRelevanceFieldEnumCode     SupplierOrderByRelevanceFieldEnum = "code"
+	SupplierOrderByRelevanceFieldEnumType     SupplierOrderByRelevanceFieldEnum = "type"
+	SupplierOrderByRelevanceFieldEnumBaseURL  SupplierOrderByRelevanceFieldEnum = "base_url"
 )
 
 type InternalProductOrderByRelevanceFieldEnum string
@@ -920,6 +926,10 @@ type supplierPrismaFields = prismaFields
 const supplierFieldID supplierPrismaFields = "id"
 
 const supplierFieldName supplierPrismaFields = "name"
+
+const supplierFieldUsername supplierPrismaFields = "username"
+
+const supplierFieldPassword supplierPrismaFields = "password"
 
 const supplierFieldCode supplierPrismaFields = "code"
 
@@ -2095,6 +2105,8 @@ type SupplierModel struct {
 type InnerSupplier struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
+	Username  *string  `json:"username,omitempty"`
+	Password  *string  `json:"password,omitempty"`
 	Code      string   `json:"code"`
 	Type      string   `json:"type"`
 	BaseURL   *string  `json:"base_url,omitempty"`
@@ -2107,6 +2119,8 @@ type InnerSupplier struct {
 type RawSupplierModel struct {
 	ID        RawString   `json:"id"`
 	Name      RawString   `json:"name"`
+	Username  *RawString  `json:"username,omitempty"`
+	Password  *RawString  `json:"password,omitempty"`
 	Code      RawString   `json:"code"`
 	Type      RawString   `json:"type"`
 	BaseURL   *RawString  `json:"base_url,omitempty"`
@@ -2121,6 +2135,20 @@ type RelationsSupplier struct {
 	SupplierProducts []SupplierProductModel `json:"supplierProducts,omitempty"`
 	SupplierOrders   []SupplierOrderModel   `json:"supplierOrders,omitempty"`
 	MainProducts     []ProductModel         `json:"MainProducts,omitempty"`
+}
+
+func (r SupplierModel) Username() (value String, ok bool) {
+	if r.InnerSupplier.Username == nil {
+		return value, false
+	}
+	return *r.InnerSupplier.Username, true
+}
+
+func (r SupplierModel) Password() (value String, ok bool) {
+	if r.InnerSupplier.Password == nil {
+		return value, false
+	}
+	return *r.InnerSupplier.Password, true
 }
 
 func (r SupplierModel) BaseURL() (value String, ok bool) {
@@ -13407,6 +13435,16 @@ type supplierQuery struct {
 	// @required
 	Name supplierQueryNameString
 
+	// Username
+	//
+	// @optional
+	Username supplierQueryUsernameString
+
+	// Password
+	//
+	// @optional
+	Password supplierQueryPasswordString
+
 	// Code
 	//
 	// @required
@@ -14194,6 +14232,790 @@ func (r supplierQueryNameString) HasSuffixIfPresent(value *string) supplierDefau
 
 func (r supplierQueryNameString) Field() supplierPrismaFields {
 	return supplierFieldName
+}
+
+// base struct
+type supplierQueryUsernameString struct{}
+
+// Set the optional value of Username
+func (r supplierQueryUsernameString) Set(value string) supplierSetParam {
+
+	return supplierSetParam{
+		data: builder.Field{
+			Name:  "username",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Username dynamically
+func (r supplierQueryUsernameString) SetIfPresent(value *String) supplierSetParam {
+	if value == nil {
+		return supplierSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of Username dynamically
+func (r supplierQueryUsernameString) SetOptional(value *String) supplierSetParam {
+	if value == nil {
+
+		var v *string
+		return supplierSetParam{
+			data: builder.Field{
+				Name:  "username",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r supplierQueryUsernameString) Equals(value string) supplierWithPrismaUsernameEqualsParam {
+
+	return supplierWithPrismaUsernameEqualsParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) EqualsIfPresent(value *string) supplierWithPrismaUsernameEqualsParam {
+	if value == nil {
+		return supplierWithPrismaUsernameEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r supplierQueryUsernameString) EqualsOptional(value *String) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) IsNull() supplierDefaultParam {
+	var str *string = nil
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) Order(direction SortOrder) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name:  "username",
+			Value: direction,
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) Cursor(cursor string) supplierCursorParam {
+	return supplierCursorParam{
+		data: builder.Field{
+			Name:  "username",
+			Value: cursor,
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) In(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) InIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r supplierQueryUsernameString) NotIn(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) NotInIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r supplierQueryUsernameString) Lt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) LtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r supplierQueryUsernameString) Lte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) LteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r supplierQueryUsernameString) Gt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) GtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r supplierQueryUsernameString) Gte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) GteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r supplierQueryUsernameString) Contains(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) ContainsIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r supplierQueryUsernameString) StartsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) StartsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r supplierQueryUsernameString) EndsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) EndsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r supplierQueryUsernameString) Search(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) SearchIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r supplierQueryUsernameString) Not(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryUsernameString) NotIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r supplierQueryUsernameString) HasPrefix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r supplierQueryUsernameString) HasPrefixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r supplierQueryUsernameString) HasSuffix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "username",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r supplierQueryUsernameString) HasSuffixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r supplierQueryUsernameString) Field() supplierPrismaFields {
+	return supplierFieldUsername
+}
+
+// base struct
+type supplierQueryPasswordString struct{}
+
+// Set the optional value of Password
+func (r supplierQueryPasswordString) Set(value string) supplierSetParam {
+
+	return supplierSetParam{
+		data: builder.Field{
+			Name:  "password",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Password dynamically
+func (r supplierQueryPasswordString) SetIfPresent(value *String) supplierSetParam {
+	if value == nil {
+		return supplierSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of Password dynamically
+func (r supplierQueryPasswordString) SetOptional(value *String) supplierSetParam {
+	if value == nil {
+
+		var v *string
+		return supplierSetParam{
+			data: builder.Field{
+				Name:  "password",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r supplierQueryPasswordString) Equals(value string) supplierWithPrismaPasswordEqualsParam {
+
+	return supplierWithPrismaPasswordEqualsParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) EqualsIfPresent(value *string) supplierWithPrismaPasswordEqualsParam {
+	if value == nil {
+		return supplierWithPrismaPasswordEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r supplierQueryPasswordString) EqualsOptional(value *String) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) IsNull() supplierDefaultParam {
+	var str *string = nil
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) Order(direction SortOrder) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name:  "password",
+			Value: direction,
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) Cursor(cursor string) supplierCursorParam {
+	return supplierCursorParam{
+		data: builder.Field{
+			Name:  "password",
+			Value: cursor,
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) In(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) InIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r supplierQueryPasswordString) NotIn(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) NotInIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r supplierQueryPasswordString) Lt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) LtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r supplierQueryPasswordString) Lte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) LteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r supplierQueryPasswordString) Gt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) GtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r supplierQueryPasswordString) Gte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) GteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r supplierQueryPasswordString) Contains(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) ContainsIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r supplierQueryPasswordString) StartsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) StartsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r supplierQueryPasswordString) EndsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) EndsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r supplierQueryPasswordString) Search(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) SearchIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r supplierQueryPasswordString) Not(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryPasswordString) NotIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r supplierQueryPasswordString) HasPrefix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r supplierQueryPasswordString) HasPrefixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r supplierQueryPasswordString) HasSuffix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "password",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r supplierQueryPasswordString) HasSuffixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r supplierQueryPasswordString) Field() supplierPrismaFields {
+	return supplierFieldPassword
 }
 
 // base struct
@@ -49416,6 +50238,8 @@ type supplierActions struct {
 var supplierOutput = []builder.Output{
 	{Name: "id"},
 	{Name: "name"},
+	{Name: "username"},
+	{Name: "password"},
 	{Name: "code"},
 	{Name: "type"},
 	{Name: "base_url"},
@@ -49743,6 +50567,162 @@ func (p supplierWithPrismaNameEqualsUniqueParam) nameField()     {}
 
 func (supplierWithPrismaNameEqualsUniqueParam) unique() {}
 func (supplierWithPrismaNameEqualsUniqueParam) equals() {}
+
+type SupplierWithPrismaUsernameEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	supplierModel()
+	usernameField()
+}
+
+type SupplierWithPrismaUsernameSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	usernameField()
+}
+
+type supplierWithPrismaUsernameSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaUsernameSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaUsernameSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaUsernameSetParam) supplierModel() {}
+
+func (p supplierWithPrismaUsernameSetParam) usernameField() {}
+
+type SupplierWithPrismaUsernameWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	usernameField()
+}
+
+type supplierWithPrismaUsernameEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaUsernameEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaUsernameEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaUsernameEqualsParam) supplierModel() {}
+
+func (p supplierWithPrismaUsernameEqualsParam) usernameField() {}
+
+func (supplierWithPrismaUsernameSetParam) settable()  {}
+func (supplierWithPrismaUsernameEqualsParam) equals() {}
+
+type supplierWithPrismaUsernameEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaUsernameEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaUsernameEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaUsernameEqualsUniqueParam) supplierModel() {}
+func (p supplierWithPrismaUsernameEqualsUniqueParam) usernameField() {}
+
+func (supplierWithPrismaUsernameEqualsUniqueParam) unique() {}
+func (supplierWithPrismaUsernameEqualsUniqueParam) equals() {}
+
+type SupplierWithPrismaPasswordEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	supplierModel()
+	passwordField()
+}
+
+type SupplierWithPrismaPasswordSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	passwordField()
+}
+
+type supplierWithPrismaPasswordSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaPasswordSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaPasswordSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaPasswordSetParam) supplierModel() {}
+
+func (p supplierWithPrismaPasswordSetParam) passwordField() {}
+
+type SupplierWithPrismaPasswordWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	passwordField()
+}
+
+type supplierWithPrismaPasswordEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaPasswordEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaPasswordEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaPasswordEqualsParam) supplierModel() {}
+
+func (p supplierWithPrismaPasswordEqualsParam) passwordField() {}
+
+func (supplierWithPrismaPasswordSetParam) settable()  {}
+func (supplierWithPrismaPasswordEqualsParam) equals() {}
+
+type supplierWithPrismaPasswordEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaPasswordEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaPasswordEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaPasswordEqualsUniqueParam) supplierModel() {}
+func (p supplierWithPrismaPasswordEqualsUniqueParam) passwordField() {}
+
+func (supplierWithPrismaPasswordEqualsUniqueParam) unique() {}
+func (supplierWithPrismaPasswordEqualsUniqueParam) equals() {}
 
 type SupplierWithPrismaCodeEqualsSetParam interface {
 	field() builder.Field

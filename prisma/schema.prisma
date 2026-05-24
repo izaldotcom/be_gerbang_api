@@ -64,23 +64,25 @@ model APIKey {
 }
 
 model Supplier {
-  id             String            @id @default(uuid())
-  name           String
-  code           String            @default("DEFAULT")
-  type           String
-  base_url       String?
-  status         Boolean           @default(true)
-  created_at     DateTime          @default(now())
-  updated_at     DateTime          @updatedAt
+  id               String            @id @default(uuid())
+  name             String
+  username         String?           
+  password         String?           
+  code             String            @default("DEFAULT")
+  type             String
+  base_url         String?
+  status           Boolean           @default(true)
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
   
   // Relasi yang sudah ada
-  products       InternalProduct[] @relation("SupplierProducts")
+  products         InternalProduct[] @relation("SupplierProducts")
   supplierProducts SupplierProduct[]
   supplierOrders   SupplierOrder[]   
 
   // === [BARU] Relasi ke Product Utama ===
   // Dinamai 'MainProducts' agar tidak bentrok dengan 'products' di atas
-  MainProducts   Product[]
+  MainProducts     Product[]
 
   @@map("supplier")
 }
