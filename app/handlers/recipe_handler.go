@@ -314,18 +314,40 @@ func (h *RecipeHandler) ReplaceAll(c echo.Context) error {
 }
 
 // ==========================================
-// 5. DELETE (Hapus Satu Item dari Resep)
+// 5. DELETE (Hapus Satu Item ATAU Semua Resep via Product ID)
 // ==========================================
 func (h *RecipeHandler) Delete(c echo.Context) error {
-	id := c.Param("id") // ID baris resep
+	id := c.Param("id") // Param ID baris resep (Contoh: /recipes/:id)
+	productID := c.QueryParam("product_id") // Query String (Contoh: /recipes?product_id=XXX)
 
-	_, err := h.DB.ProductRecipe.FindUnique(
-		db.ProductRecipe.ID.Equals(id),
-	).Delete().Exec(c.Request().Context())
+	ctx := c.Request().Context()
 
-	if err != nil {
-		return c.JSON(500, echo.Map{"error": "Gagal delete: " + err.Error()})
+	// A. Hapus SEMUA resep berdasarkan product_id
+	if productID != "" {
+		_, err := h.DB.ProductRecipe.FindMany(
+			db.ProductRecipe.ProductID.Equals(productID),
+		).Delete().Exec(ctx)
+
+		if err != nil {
+			return c.JSON(500, echo.Map{"error": "Gagal menghapus semua resep dari produk ini: " + err.Error()})
+		}
+
+		return c.JSON(200, echo.Map{"message": "Semua bahan resep untuk produk tersebut berhasil dihapus"})
 	}
 
-	return c.JSON(200, echo.Map{"message": "Recipe item deleted"})
+	// B. Hapus HANYA 1 item resep berdasarkan id
+	if id != "" {
+		_, err := h.DB.ProductRecipe.FindUnique(
+			db.ProductRecipe.ID.Equals(id),
+		).Delete().Exec(ctx)
+
+		if err != nil {
+			return c.JSON(500, echo.Map{"error": "Gagal delete item resep: " + err.Error()})
+		}
+
+		return c.JSON(200, echo.Map{"message": "Recipe item deleted"})
+	}
+
+	// Jika keduanya kosong
+	return c.JSON(400, echo.Map{"error": "Harus menyertakan ID resep atau parameter product_id"})
 }

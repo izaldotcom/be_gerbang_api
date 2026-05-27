@@ -75,6 +75,11 @@ func Init(
 	protected.PUT("/recipes/:id", recipeHandler.UpdateItem)
 	protected.PUT("/recipes", recipeHandler.UpdateItem)
 	protected.DELETE("/recipes/:id", recipeHandler.Delete)
+	
+	// === [PERBAIKAN] Tambahkan 2 baris ini untuk handle hapus massal via query param ===
+	protected.DELETE("/recipes", recipeHandler.Delete)   // Menangani /recipes?product_id=...
+	protected.DELETE("/recipes/", recipeHandler.Delete)  // Menangani /recipes/?product_id=... (Sesuai log FE Anda)
+	// ===================================================================================
 
 	// --- 7. [BARU] Payment Types ---
 	protected.GET("/payment-types", paymentTypeHandler.GetAll)

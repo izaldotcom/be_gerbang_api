@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"gerbangapi/app/services/scraper"
@@ -76,7 +77,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	).With(
 		db.InternalOrder.Product.Fetch(), 
 		db.InternalOrder.User.Fetch(),
-		db.InternalOrder.PaymentType.Fetch(), // [BARU] Tarik relasi PaymentType
+		db.InternalOrder.PaymentType.Fetch(), 
 	).Exec(ctx)
 
 	if err != nil {
@@ -84,32 +85,19 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 		return nil
 	}
 
-	// Ambil Item Detail
+	// === [PERBAIKAN] Ambil Item Detail TANPA LIMIT 1 ===
 	var items []map[string]interface{}
 	dbClient.Prisma.QueryRaw(
 		`SELECT sp.supplier_product_id, soi.quantity 
 		 FROM supplier_order_item soi
 		 JOIN supplier_product sp ON soi.supplier_product_id = sp.id
-		 WHERE soi.supplier_order_id = ? 
-		 LIMIT 1`,
+		 WHERE soi.supplier_order_id = ?`, // LIMIT 1 dihapus agar semua bahan campuran terbaca
 		supplierOrder.ID,
 	).Exec(ctx, &items)
 
 	if len(items) == 0 {
 		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "No items found for this order")
 		return nil
-	}
-
-	productHTMLID := items[0]["supplier_product_id"].(string)
-	
-	// Parse Quantity
-	var repeatCount int
-	if qtyFloat, ok := items[0]["quantity"].(float64); ok {
-		repeatCount = int(qtyFloat)
-	} else if qtyInt, ok := items[0]["quantity"].(int64); ok {
-		repeatCount = int(qtyInt)
-	} else {
-		repeatCount = 1
 	}
 
 	// =================================================================
@@ -142,29 +130,55 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 		return nil
 	}
 
-	// [BARU] Siapkan Kode Payment Type
 	paymentCode := "40" // Default ke QRIS
 	if pt, ok := internalOrder.PaymentType(); ok && pt != nil {
 		paymentCode = pt.Code
 	}
 
-	// Place Order dengan tambahan parameter Payment Type
-	log.Printf("🛒 Placing order for Player: %s, Item: %s, Payment Code: %s", internalOrder.BuyerUID, productHTMLID, paymentCode)
-	
-	// [PERBAIKAN] Menangkap URL berbentuk string, bukan array lagi
-	paymentURLs, err := svc.PlaceOrder(internalOrder.BuyerUID, productHTMLID, repeatCount, paymentCode)
+	var allPaymentURLs []string
 
-	if err != nil {
-		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Place Order Failed: "+err.Error())
-		return nil
+	// === [PERBAIKAN] Looping untuk Setiap Bahan Baku di dalam Resep ===
+	for i, item := range items {
+		productHTMLID := item["supplier_product_id"].(string)
+		
+		// Parse Quantity
+		var repeatCount int
+		if qtyFloat, ok := item["quantity"].(float64); ok {
+			repeatCount = int(qtyFloat)
+		} else if qtyInt, ok := item["quantity"].(int64); ok {
+			repeatCount = int(qtyInt)
+		} else {
+			repeatCount = 1
+		}
+
+		log.Printf("🛒 [Mix %d/%d] Placing order for Player: %s, Item HTML ID: %s, Qty: %d", i+1, len(items), internalOrder.BuyerUID, productHTMLID, repeatCount)
+		
+		paymentURLs, err := svc.PlaceOrder(internalOrder.BuyerUID, productHTMLID, repeatCount, paymentCode)
+
+		if err != nil {
+			// Jika salah satu bahan gagal, gagalkan seluruh transaksi
+			failOrder(dbClient, orderID, supplierOrder.InternalOrderID, fmt.Sprintf("Place Order Failed on item %s: %v", productHTMLID, err))
+			return nil 
+		}
+
+		if paymentURLs != "" {
+			allPaymentURLs = append(allPaymentURLs, paymentURLs)
+		}
+		
+		// Beri jeda antar bahan baku jika ada lebih dari 1 bahan
+		if i < len(items)-1 {
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	// =================================================================
 	// LANGKAH E: Sukses & Notifikasi
 	// =================================================================
-	log.Printf("✅ Order #%s Success! URLs: %s", orderID, paymentURLs)
+	
+	// Gabungkan semua URL pembayaran (jika campuran, akan dipisah koma)
+	providerTrx := strings.Join(allPaymentURLs, ",")
+	log.Printf("✅ Order #%s Success! URLs: %s", orderID, providerTrx)
 
-	providerTrx := paymentURLs // Langsung ambil string URL
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success', provider_trx_id=? WHERE id=?", providerTrx, orderID).Exec(ctx)
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", supplierOrder.InternalOrderID).Exec(ctx)
 
@@ -175,8 +189,18 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	tanggal := time.Now().Format("02 Jan 2006 15:04")
 	supplierName := supplierMH.Name
 
-// --- Template Notifikasi Profesional ---
-msg := fmt.Sprintf(`
+	// Buat tautan URL dinamis (Jika URL lebih dari 1, ubah kalimatnya)
+	var urlLinks string
+	if len(allPaymentURLs) > 1 {
+		for idx, url := range allPaymentURLs {
+			urlLinks += fmt.Sprintf("\n🔗 <a href=\"%s\">Bayar Bagian %d</a>", url, idx+1)
+		}
+	} else {
+		urlLinks = fmt.Sprintf("\n🔗 <a href=\"%s\">Klik untuk bayar</a>", providerTrx)
+	}
+
+	// --- Template Notifikasi Profesional ---
+	msg := fmt.Sprintf(`
 <b>📦 TRANSAKSI BERHASIL</b>
 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 <b>Detail Produk:</b>
@@ -184,14 +208,14 @@ msg := fmt.Sprintf(`
 
 <b>Informasi Pengiriman:</b>
 📍 <b>Tujuan:</b> <code>%s</code>
-🔗 <b>Payment URL:</b> <a href="%s">Klik untuk bayar</a>
+<b>Payment URL:</b> %s
 🏢 <b>Supplier:</b> %s
 
 <b>Tanggal:</b> %s
 <b>Status:</b> <pre>SUCCESS (MENUNGGU PEMBAYARAN)</pre>
 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 <i>Ref ID: %s</i>
-`, productName, tujuan, providerTrx, supplierName, tanggal, supplierOrder.InternalOrderID)
+`, productName, tujuan, urlLinks, supplierName, tanggal, supplierOrder.InternalOrderID)
 
 	// 1. Kirim ke ADMIN (Wajib)
 	adminChatID := os.Getenv("TELEGRAM_CHAT_ID")
@@ -227,7 +251,7 @@ msg := fmt.Sprintf(`
 					"price":        productPrice,
 					"status":       "success",
 					"status_code":  1,
-					"sn":           providerTrx, // Diisi dengan URL Pembayaran
+					"sn":           providerTrx,
 					"destination":  tujuan,
 					"message":      "Transaksi berhasil, silakan lakukan pembayaran melalui URL terlampir",
 				},
@@ -264,7 +288,6 @@ func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
 	}
 }
 
-// [UPDATE] Menerima targetChatID agar dinamis
 func sendTelegramNotification(targetChatID string, messageHTML string) {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" || targetChatID == "" {
