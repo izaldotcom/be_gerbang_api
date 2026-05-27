@@ -76,6 +76,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	).With(
 		db.InternalOrder.Product.Fetch(), 
 		db.InternalOrder.User.Fetch(),
+		db.InternalOrder.PaymentType.Fetch(), // [BARU] Tarik relasi PaymentType
 	).Exec(ctx)
 
 	if err != nil {
@@ -126,7 +127,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	log.Println("⏳ Waiting for browser page load...")
 	time.Sleep(5 * time.Second) 
 
-	// Mengambil Username dan Password dari database[cite: 6]
+	// Mengambil Username dan Password dari database
 	mhUsername, okUser := supplierMH.Username()
 	mhPassword, okPass := supplierMH.Password()
 	
@@ -141,9 +142,17 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 		return nil
 	}
 
-	// Place Order
-	log.Printf("🛒 Placing order for Player: %s, Item: %s", internalOrder.BuyerUID, productHTMLID)
-	trxIDs, err := svc.PlaceOrder(internalOrder.BuyerUID, productHTMLID, repeatCount)
+	// [BARU] Siapkan Kode Payment Type
+	paymentCode := "40" // Default ke QRIS
+	if pt, ok := internalOrder.PaymentType(); ok && pt != nil {
+		paymentCode = pt.Code
+	}
+
+	// Place Order dengan tambahan parameter Payment Type
+	log.Printf("🛒 Placing order for Player: %s, Item: %s, Payment Code: %s", internalOrder.BuyerUID, productHTMLID, paymentCode)
+	
+	// [PERBAIKAN] Menangkap URL berbentuk string, bukan array lagi
+	paymentURLs, err := svc.PlaceOrder(internalOrder.BuyerUID, productHTMLID, repeatCount, paymentCode)
 
 	if err != nil {
 		failOrder(dbClient, orderID, supplierOrder.InternalOrderID, "Place Order Failed: "+err.Error())
@@ -153,9 +162,9 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// =================================================================
 	// LANGKAH E: Sukses & Notifikasi
 	// =================================================================
-	log.Printf("✅ Order #%s Success! Trx: %v", orderID, trxIDs)
+	log.Printf("✅ Order #%s Success! URLs: %s", orderID, paymentURLs)
 
-	providerTrx := fmt.Sprint(trxIDs[0])
+	providerTrx := paymentURLs // Langsung ambil string URL
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='success', provider_trx_id=? WHERE id=?", providerTrx, orderID).Exec(ctx)
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='success' WHERE id=?", supplierOrder.InternalOrderID).Exec(ctx)
 
@@ -175,11 +184,11 @@ msg := fmt.Sprintf(`
 
 <b>Informasi Pengiriman:</b>
 📍 <b>Tujuan:</b> <code>%s</code>
-📑 <b>SN / TRX:</b> <code>%s</code>
+🔗 <b>Payment URL:</b> <a href="%s">Klik untuk bayar</a>
 🏢 <b>Supplier:</b> %s
 
 <b>Tanggal:</b> %s
-<b>Status:</b> <pre>SUCCESS</pre>
+<b>Status:</b> <pre>SUCCESS (MENUNGGU PEMBAYARAN)</pre>
 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 <i>Ref ID: %s</i>
 `, productName, tujuan, providerTrx, supplierName, tanggal, supplierOrder.InternalOrderID)
@@ -194,8 +203,7 @@ msg := fmt.Sprintf(`
 	user, ok := internalOrder.User() 
 	if ok && user != nil {
 		
-		// A. Telegram Personal (Cek field telegram_chat_id di DB)
-		// Pastikan di schema.prisma sudah ada field telegram_chat_id (String?)
+		// A. Telegram Personal
 		if userChatID, okID := user.TelegramChatID(); okID && userChatID != "" {
 			log.Printf("📩 Sending Telegram msg to User: %s", userChatID)
 			go sendTelegramNotification(userChatID, msg)
@@ -219,9 +227,9 @@ msg := fmt.Sprintf(`
 					"price":        productPrice,
 					"status":       "success",
 					"status_code":  1,
-					"sn":           providerTrx,
+					"sn":           providerTrx, // Diisi dengan URL Pembayaran
 					"destination":  tujuan,
-					"message":      "Transaksi berhasil diproses",
+					"message":      "Transaksi berhasil, silakan lakukan pembayaran melalui URL terlampir",
 				},
 			}
 			go sendWebhookCallback(url, webhookPayload)
@@ -241,7 +249,7 @@ func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
 	dbClient.Prisma.ExecuteRaw("UPDATE supplier_order SET status='failed', last_error=? WHERE id=?", reason, orderID).Exec(ctx)
 	dbClient.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalID).Exec(ctx)
 
-	// Notif Telegram Gagal ke ADMIN (Sertakan Info Supplier jika memungkinkan)
+	// Notif Telegram Gagal ke ADMIN
 	adminChatID := os.Getenv("TELEGRAM_CHAT_ID")
 	if adminChatID != "" {
 		msg := fmt.Sprintf(`
@@ -256,7 +264,7 @@ func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
 	}
 }
 
-// [UPDATE] Menerima targetChatID agar dinamis (bisa ke Admin atau User)
+// [UPDATE] Menerima targetChatID agar dinamis
 func sendTelegramNotification(targetChatID string, messageHTML string) {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" || targetChatID == "" {
@@ -268,7 +276,7 @@ func sendTelegramNotification(targetChatID string, messageHTML string) {
 		"chat_id":                    targetChatID,
 		"text":                       messageHTML,
 		"parse_mode":                 "HTML",
-		"disable_web_page_preview":   true, // Membuat tampilan lebih bersih
+		"disable_web_page_preview":   true,
 	}
 
 	jsonVal, _ := json.Marshal(payload)

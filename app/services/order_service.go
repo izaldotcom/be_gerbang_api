@@ -145,14 +145,15 @@ func (s *OrderService) ProcessInternalOrder(
 	return s.CreateSupplierOrderFromInternal(ctx, *internalOrder, supplierID)
 }
 
-// 4) GET HISTORY BY USER ID (BARU)
+// 4) GET HISTORY BY USER ID
 func (s *OrderService) GetOrderHistory(ctx context.Context, userID string) ([]db.InternalOrderModel, error) {
-	// Ambil Internal Order milik User tersebut
+	// Ambil Internal Order milik User tersebut beserta seluruh relasinya
 	orders, err := s.client.InternalOrder.FindMany(
 		db.InternalOrder.UserID.Equals(userID),
 	).With(
 		db.InternalOrder.Product.Fetch(),
 		db.InternalOrder.SupplierOrders.Fetch(),
+		db.InternalOrder.PaymentType.Fetch(), // [BARU] Tambahkan Fetch PaymentType agar datanya bisa dibaca handler
 	).Exec(ctx) // [FIX] OrderBy dihapus untuk mencegah panic jika generate belum update
 
 	if err != nil {
