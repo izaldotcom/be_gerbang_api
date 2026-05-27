@@ -283,9 +283,11 @@ model InternalOrder {
   buyer_uid  String
   quantity   Int
 
-  // [BARU] Tambahkan ini
-  user_id String? // Pakai ? dulu agar data lama tidak error
+  user_id String?
   user    User?   @relation(fields: [user_id], references: [id])
+
+  payment_type_id String?
+  paymentType     PaymentType? @relation(fields: [payment_type_id], references: [id])
 
   status     String   @default("pending")
   created_at DateTime @default(now())
@@ -327,6 +329,20 @@ model SupplierOrderItem {
   supplierProduct SupplierProduct @relation(fields: [supplier_product_id], references: [id])
 
   @@map("supplier_order_item")
+}
+
+model PaymentType {
+  id   String @id @default(uuid())
+  code String @unique
+  name String
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relasi balik ke InternalOrder
+  orders InternalOrder[]
+
+  @@map("payment_type")
 }
 `
 const schemaDatasourceURL = ""
@@ -413,6 +429,7 @@ func newClient() *PrismaClient {
 	c.InternalOrder = internalOrderActions{client: c}
 	c.SupplierOrder = supplierOrderActions{client: c}
 	c.SupplierOrderItem = supplierOrderItemActions{client: c}
+	c.PaymentType = paymentTypeActions{client: c}
 
 	c.Prisma = &PrismaActions{
 		Raw: &raw.Raw{Engine: c},
@@ -465,6 +482,8 @@ type PrismaClient struct {
 	SupplierOrder supplierOrderActions
 	// SupplierOrderItem provides access to CRUD methods.
 	SupplierOrderItem supplierOrderItemActions
+	// PaymentType provides access to CRUD methods.
+	PaymentType paymentTypeActions
 }
 
 // --- template enums.gotpl ---
@@ -624,14 +643,15 @@ const (
 type InternalOrderScalarFieldEnum string
 
 const (
-	InternalOrderScalarFieldEnumID        InternalOrderScalarFieldEnum = "id"
-	InternalOrderScalarFieldEnumProductID InternalOrderScalarFieldEnum = "product_id"
-	InternalOrderScalarFieldEnumBuyerUID  InternalOrderScalarFieldEnum = "buyer_uid"
-	InternalOrderScalarFieldEnumQuantity  InternalOrderScalarFieldEnum = "quantity"
-	InternalOrderScalarFieldEnumUserID    InternalOrderScalarFieldEnum = "user_id"
-	InternalOrderScalarFieldEnumStatus    InternalOrderScalarFieldEnum = "status"
-	InternalOrderScalarFieldEnumCreatedAt InternalOrderScalarFieldEnum = "created_at"
-	InternalOrderScalarFieldEnumUpdatedAt InternalOrderScalarFieldEnum = "updated_at"
+	InternalOrderScalarFieldEnumID            InternalOrderScalarFieldEnum = "id"
+	InternalOrderScalarFieldEnumProductID     InternalOrderScalarFieldEnum = "product_id"
+	InternalOrderScalarFieldEnumBuyerUID      InternalOrderScalarFieldEnum = "buyer_uid"
+	InternalOrderScalarFieldEnumQuantity      InternalOrderScalarFieldEnum = "quantity"
+	InternalOrderScalarFieldEnumUserID        InternalOrderScalarFieldEnum = "user_id"
+	InternalOrderScalarFieldEnumPaymentTypeID InternalOrderScalarFieldEnum = "payment_type_id"
+	InternalOrderScalarFieldEnumStatus        InternalOrderScalarFieldEnum = "status"
+	InternalOrderScalarFieldEnumCreatedAt     InternalOrderScalarFieldEnum = "created_at"
+	InternalOrderScalarFieldEnumUpdatedAt     InternalOrderScalarFieldEnum = "updated_at"
 )
 
 type SupplierOrderScalarFieldEnum string
@@ -657,6 +677,16 @@ const (
 	SupplierOrderItemScalarFieldEnumQuantity          SupplierOrderItemScalarFieldEnum = "quantity"
 	SupplierOrderItemScalarFieldEnumCreatedAt         SupplierOrderItemScalarFieldEnum = "created_at"
 	SupplierOrderItemScalarFieldEnumUpdatedAt         SupplierOrderItemScalarFieldEnum = "updated_at"
+)
+
+type PaymentTypeScalarFieldEnum string
+
+const (
+	PaymentTypeScalarFieldEnumID        PaymentTypeScalarFieldEnum = "id"
+	PaymentTypeScalarFieldEnumCode      PaymentTypeScalarFieldEnum = "code"
+	PaymentTypeScalarFieldEnumName      PaymentTypeScalarFieldEnum = "name"
+	PaymentTypeScalarFieldEnumCreatedAt PaymentTypeScalarFieldEnum = "created_at"
+	PaymentTypeScalarFieldEnumUpdatedAt PaymentTypeScalarFieldEnum = "updated_at"
 )
 
 type SortOrder string
@@ -784,11 +814,12 @@ const (
 type InternalOrderOrderByRelevanceFieldEnum string
 
 const (
-	InternalOrderOrderByRelevanceFieldEnumID        InternalOrderOrderByRelevanceFieldEnum = "id"
-	InternalOrderOrderByRelevanceFieldEnumProductID InternalOrderOrderByRelevanceFieldEnum = "product_id"
-	InternalOrderOrderByRelevanceFieldEnumBuyerUID  InternalOrderOrderByRelevanceFieldEnum = "buyer_uid"
-	InternalOrderOrderByRelevanceFieldEnumUserID    InternalOrderOrderByRelevanceFieldEnum = "user_id"
-	InternalOrderOrderByRelevanceFieldEnumStatus    InternalOrderOrderByRelevanceFieldEnum = "status"
+	InternalOrderOrderByRelevanceFieldEnumID            InternalOrderOrderByRelevanceFieldEnum = "id"
+	InternalOrderOrderByRelevanceFieldEnumProductID     InternalOrderOrderByRelevanceFieldEnum = "product_id"
+	InternalOrderOrderByRelevanceFieldEnumBuyerUID      InternalOrderOrderByRelevanceFieldEnum = "buyer_uid"
+	InternalOrderOrderByRelevanceFieldEnumUserID        InternalOrderOrderByRelevanceFieldEnum = "user_id"
+	InternalOrderOrderByRelevanceFieldEnumPaymentTypeID InternalOrderOrderByRelevanceFieldEnum = "payment_type_id"
+	InternalOrderOrderByRelevanceFieldEnumStatus        InternalOrderOrderByRelevanceFieldEnum = "status"
 )
 
 type SupplierOrderOrderByRelevanceFieldEnum string
@@ -808,6 +839,14 @@ const (
 	SupplierOrderItemOrderByRelevanceFieldEnumID                SupplierOrderItemOrderByRelevanceFieldEnum = "id"
 	SupplierOrderItemOrderByRelevanceFieldEnumSupplierOrderID   SupplierOrderItemOrderByRelevanceFieldEnum = "supplier_order_id"
 	SupplierOrderItemOrderByRelevanceFieldEnumSupplierProductID SupplierOrderItemOrderByRelevanceFieldEnum = "supplier_product_id"
+)
+
+type PaymentTypeOrderByRelevanceFieldEnum string
+
+const (
+	PaymentTypeOrderByRelevanceFieldEnumID   PaymentTypeOrderByRelevanceFieldEnum = "id"
+	PaymentTypeOrderByRelevanceFieldEnumCode PaymentTypeOrderByRelevanceFieldEnum = "code"
+	PaymentTypeOrderByRelevanceFieldEnumName PaymentTypeOrderByRelevanceFieldEnum = "name"
 )
 
 // --- template errors.gotpl ---
@@ -1123,6 +1162,10 @@ const internalOrderFieldUserID internalOrderPrismaFields = "user_id"
 
 const internalOrderFieldUser internalOrderPrismaFields = "user"
 
+const internalOrderFieldPaymentTypeID internalOrderPrismaFields = "payment_type_id"
+
+const internalOrderFieldPaymentType internalOrderPrismaFields = "paymentType"
+
 const internalOrderFieldStatus internalOrderPrismaFields = "status"
 
 const internalOrderFieldCreatedAt internalOrderPrismaFields = "created_at"
@@ -1182,6 +1225,22 @@ const supplierOrderItemFieldSupplierOrder supplierOrderItemPrismaFields = "suppl
 const supplierOrderItemFieldSupplierProduct supplierOrderItemPrismaFields = "supplierProduct"
 
 const supplierOrderItemFieldRelevance supplierOrderItemPrismaFields = "relevance"
+
+type paymentTypePrismaFields = prismaFields
+
+const paymentTypeFieldID paymentTypePrismaFields = "id"
+
+const paymentTypeFieldCode paymentTypePrismaFields = "code"
+
+const paymentTypeFieldName paymentTypePrismaFields = "name"
+
+const paymentTypeFieldCreatedAt paymentTypePrismaFields = "created_at"
+
+const paymentTypeFieldUpdatedAt paymentTypePrismaFields = "updated_at"
+
+const paymentTypeFieldOrders paymentTypePrismaFields = "orders"
+
+const paymentTypeFieldRelevance paymentTypePrismaFields = "relevance"
 
 // --- template mock.gotpl ---
 func NewMock() (*PrismaClient, *Mock, func(t *testing.T)) {
@@ -1249,6 +1308,10 @@ func NewMock() (*PrismaClient, *Mock, func(t *testing.T)) {
 		mock: m,
 	}
 
+	m.PaymentType = paymentTypeMock{
+		mock: m,
+	}
+
 	return pc, m, m.Ensure
 }
 
@@ -1282,6 +1345,8 @@ type Mock struct {
 	SupplierOrder supplierOrderMock
 
 	SupplierOrderItem supplierOrderItemMock
+
+	PaymentType paymentTypeMock
 }
 
 type userMock struct {
@@ -1866,6 +1931,48 @@ func (m *supplierOrderItemMockExec) ReturnsMany(v []SupplierOrderItemModel) {
 }
 
 func (m *supplierOrderItemMockExec) Errors(err error) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query:   m.query,
+		WantErr: err,
+	})
+}
+
+type paymentTypeMock struct {
+	mock *Mock
+}
+
+type PaymentTypeMockExpectParam interface {
+	ExtractQuery() builder.Query
+	paymentTypeModel()
+}
+
+func (m *paymentTypeMock) Expect(query PaymentTypeMockExpectParam) *paymentTypeMockExec {
+	return &paymentTypeMockExec{
+		mock:  m.mock,
+		query: query.ExtractQuery(),
+	}
+}
+
+type paymentTypeMockExec struct {
+	mock  *Mock
+	query builder.Query
+}
+
+func (m *paymentTypeMockExec) Returns(v PaymentTypeModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *paymentTypeMockExec) ReturnsMany(v []PaymentTypeModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *paymentTypeMockExec) Errors(err error) {
 	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
 		Query:   m.query,
 		WantErr: err,
@@ -2595,31 +2702,34 @@ type InternalOrderModel struct {
 
 // InnerInternalOrder holds the actual data
 type InnerInternalOrder struct {
-	ID        string   `json:"id"`
-	ProductID string   `json:"product_id"`
-	BuyerUID  string   `json:"buyer_uid"`
-	Quantity  int      `json:"quantity"`
-	UserID    *string  `json:"user_id,omitempty"`
-	Status    string   `json:"status"`
-	CreatedAt DateTime `json:"created_at"`
-	UpdatedAt DateTime `json:"updated_at"`
+	ID            string   `json:"id"`
+	ProductID     string   `json:"product_id"`
+	BuyerUID      string   `json:"buyer_uid"`
+	Quantity      int      `json:"quantity"`
+	UserID        *string  `json:"user_id,omitempty"`
+	PaymentTypeID *string  `json:"payment_type_id,omitempty"`
+	Status        string   `json:"status"`
+	CreatedAt     DateTime `json:"created_at"`
+	UpdatedAt     DateTime `json:"updated_at"`
 }
 
 // RawInternalOrderModel is a struct for InternalOrder when used in raw queries
 type RawInternalOrderModel struct {
-	ID        RawString   `json:"id"`
-	ProductID RawString   `json:"product_id"`
-	BuyerUID  RawString   `json:"buyer_uid"`
-	Quantity  RawInt      `json:"quantity"`
-	UserID    *RawString  `json:"user_id,omitempty"`
-	Status    RawString   `json:"status"`
-	CreatedAt RawDateTime `json:"created_at"`
-	UpdatedAt RawDateTime `json:"updated_at"`
+	ID            RawString   `json:"id"`
+	ProductID     RawString   `json:"product_id"`
+	BuyerUID      RawString   `json:"buyer_uid"`
+	Quantity      RawInt      `json:"quantity"`
+	UserID        *RawString  `json:"user_id,omitempty"`
+	PaymentTypeID *RawString  `json:"payment_type_id,omitempty"`
+	Status        RawString   `json:"status"`
+	CreatedAt     RawDateTime `json:"created_at"`
+	UpdatedAt     RawDateTime `json:"updated_at"`
 }
 
 // RelationsInternalOrder holds the relation data separately
 type RelationsInternalOrder struct {
 	User           *UserModel           `json:"user,omitempty"`
+	PaymentType    *PaymentTypeModel    `json:"paymentType,omitempty"`
 	Product        *ProductModel        `json:"product,omitempty"`
 	SupplierOrders []SupplierOrderModel `json:"supplierOrders,omitempty"`
 }
@@ -2636,6 +2746,20 @@ func (r InternalOrderModel) User() (value *UserModel, ok bool) {
 		return value, false
 	}
 	return r.RelationsInternalOrder.User, true
+}
+
+func (r InternalOrderModel) PaymentTypeID() (value String, ok bool) {
+	if r.InnerInternalOrder.PaymentTypeID == nil {
+		return value, false
+	}
+	return *r.InnerInternalOrder.PaymentTypeID, true
+}
+
+func (r InternalOrderModel) PaymentType() (value *PaymentTypeModel, ok bool) {
+	if r.RelationsInternalOrder.PaymentType == nil {
+		return value, false
+	}
+	return r.RelationsInternalOrder.PaymentType, true
 }
 
 func (r InternalOrderModel) Product() (value *ProductModel) {
@@ -2770,6 +2894,42 @@ func (r SupplierOrderItemModel) SupplierProduct() (value *SupplierProductModel) 
 		panic("attempted to access supplierProduct but did not fetch it using the .With() syntax")
 	}
 	return r.RelationsSupplierOrderItem.SupplierProduct
+}
+
+// PaymentTypeModel represents the PaymentType model and is a wrapper for accessing fields and methods
+type PaymentTypeModel struct {
+	InnerPaymentType
+	RelationsPaymentType
+}
+
+// InnerPaymentType holds the actual data
+type InnerPaymentType struct {
+	ID        string   `json:"id"`
+	Code      string   `json:"code"`
+	Name      string   `json:"name"`
+	CreatedAt DateTime `json:"created_at"`
+	UpdatedAt DateTime `json:"updated_at"`
+}
+
+// RawPaymentTypeModel is a struct for PaymentType when used in raw queries
+type RawPaymentTypeModel struct {
+	ID        RawString   `json:"id"`
+	Code      RawString   `json:"code"`
+	Name      RawString   `json:"name"`
+	CreatedAt RawDateTime `json:"created_at"`
+	UpdatedAt RawDateTime `json:"updated_at"`
+}
+
+// RelationsPaymentType holds the relation data separately
+type RelationsPaymentType struct {
+	Orders []InternalOrderModel `json:"orders,omitempty"`
+}
+
+func (r PaymentTypeModel) Orders() (value []InternalOrderModel) {
+	if r.RelationsPaymentType.Orders == nil {
+		panic("attempted to access orders but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsPaymentType.Orders
 }
 
 // --- template query.gotpl ---
@@ -37604,6 +37764,13 @@ type internalOrderQuery struct {
 
 	User internalOrderQueryUserRelations
 
+	// PaymentTypeID
+	//
+	// @optional
+	PaymentTypeID internalOrderQueryPaymentTypeIDString
+
+	PaymentType internalOrderQueryPaymentTypeRelations
+
 	// Status
 	//
 	// @required
@@ -39598,6 +39765,486 @@ func (r internalOrderQueryUserRelations) Unlink() internalOrderSetParam {
 
 func (r internalOrderQueryUserUser) Field() internalOrderPrismaFields {
 	return internalOrderFieldUser
+}
+
+// base struct
+type internalOrderQueryPaymentTypeIDString struct{}
+
+// Set the optional value of PaymentTypeID
+func (r internalOrderQueryPaymentTypeIDString) Set(value string) internalOrderSetParam {
+
+	return internalOrderSetParam{
+		data: builder.Field{
+			Name:  "payment_type_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of PaymentTypeID dynamically
+func (r internalOrderQueryPaymentTypeIDString) SetIfPresent(value *String) internalOrderSetParam {
+	if value == nil {
+		return internalOrderSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of PaymentTypeID dynamically
+func (r internalOrderQueryPaymentTypeIDString) SetOptional(value *String) internalOrderSetParam {
+	if value == nil {
+
+		var v *string
+		return internalOrderSetParam{
+			data: builder.Field{
+				Name:  "payment_type_id",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Equals(value string) internalOrderWithPrismaPaymentTypeIDEqualsParam {
+
+	return internalOrderWithPrismaPaymentTypeIDEqualsParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) EqualsIfPresent(value *string) internalOrderWithPrismaPaymentTypeIDEqualsParam {
+	if value == nil {
+		return internalOrderWithPrismaPaymentTypeIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) EqualsOptional(value *String) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) IsNull() internalOrderDefaultParam {
+	var str *string = nil
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Order(direction SortOrder) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name:  "payment_type_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Cursor(cursor string) internalOrderCursorParam {
+	return internalOrderCursorParam{
+		data: builder.Field{
+			Name:  "payment_type_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) In(value []string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) InIfPresent(value []string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) NotIn(value []string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) NotInIfPresent(value []string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Lt(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) LtIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Lte(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) LteIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Gt(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) GtIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Gte(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) GteIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Contains(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) ContainsIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) StartsWith(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) StartsWithIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) EndsWith(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) EndsWithIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Search(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) SearchIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Not(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeIDString) NotIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r internalOrderQueryPaymentTypeIDString) HasPrefix(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r internalOrderQueryPaymentTypeIDString) HasPrefixIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r internalOrderQueryPaymentTypeIDString) HasSuffix(value string) internalOrderDefaultParam {
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "payment_type_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r internalOrderQueryPaymentTypeIDString) HasSuffixIfPresent(value *string) internalOrderDefaultParam {
+	if value == nil {
+		return internalOrderDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r internalOrderQueryPaymentTypeIDString) Field() internalOrderPrismaFields {
+	return internalOrderFieldPaymentTypeID
+}
+
+// base struct
+type internalOrderQueryPaymentTypePaymentType struct{}
+
+type internalOrderQueryPaymentTypeRelations struct{}
+
+// InternalOrder -> PaymentType
+//
+// @relation
+// @optional
+func (internalOrderQueryPaymentTypeRelations) Where(
+	params ...PaymentTypeWhereParam,
+) internalOrderDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return internalOrderDefaultParam{
+		data: builder.Field{
+			Name: "paymentType",
+			Fields: []builder.Field{
+				{
+					Name:   "is",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (internalOrderQueryPaymentTypeRelations) Fetch() internalOrderToPaymentTypeFindUnique {
+	var v internalOrderToPaymentTypeFindUnique
+
+	v.query.Operation = "query"
+	v.query.Method = "paymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	return v
+}
+
+func (r internalOrderQueryPaymentTypeRelations) Link(
+	params PaymentTypeWhereParam,
+) internalOrderSetParam {
+	var fields []builder.Field
+
+	f := params.field()
+	if f.Fields == nil && f.Value == nil {
+		return internalOrderSetParam{}
+	}
+
+	fields = append(fields, f)
+
+	return internalOrderSetParam{
+		data: builder.Field{
+			Name: "paymentType",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+}
+
+func (r internalOrderQueryPaymentTypeRelations) Unlink() internalOrderSetParam {
+	var v internalOrderSetParam
+
+	v = internalOrderSetParam{
+		data: builder.Field{
+			Name: "paymentType",
+			Fields: []builder.Field{
+				{
+					Name:  "disconnect",
+					Value: true,
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r internalOrderQueryPaymentTypePaymentType) Field() internalOrderPrismaFields {
+	return internalOrderFieldPaymentType
 }
 
 // base struct
@@ -47027,6 +47674,2002 @@ func (r supplierOrderItemQueryRelevanceSupplierOrderItemOrderByRelevanceInput) S
 
 func (r supplierOrderItemQueryRelevanceSupplierOrderItemOrderByRelevanceInput) Field() supplierOrderItemPrismaFields {
 	return supplierOrderItemFieldRelevance
+}
+
+// PaymentType acts as a namespaces to access query methods for the PaymentType model
+var PaymentType = paymentTypeQuery{}
+
+// paymentTypeQuery exposes query functions for the paymentType model
+type paymentTypeQuery struct {
+
+	// ID
+	//
+	// @required
+	ID paymentTypeQueryIDString
+
+	// Code
+	//
+	// @required
+	// @unique
+	Code paymentTypeQueryCodeString
+
+	// Name
+	//
+	// @required
+	Name paymentTypeQueryNameString
+
+	// CreatedAt
+	//
+	// @required
+	CreatedAt paymentTypeQueryCreatedAtDateTime
+
+	// UpdatedAt
+	//
+	// @required
+	UpdatedAt paymentTypeQueryUpdatedAtDateTime
+
+	Orders paymentTypeQueryOrdersRelations
+
+	// Relevance_
+	//
+	// @optional
+	Relevance_ paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput
+}
+
+func (paymentTypeQuery) Not(params ...PaymentTypeWhereParam) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:     "NOT",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (paymentTypeQuery) Or(params ...PaymentTypeWhereParam) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:     "OR",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (paymentTypeQuery) And(params ...PaymentTypeWhereParam) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:     "AND",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+// base struct
+type paymentTypeQueryIDString struct{}
+
+// Set the required value of ID
+func (r paymentTypeQueryIDString) Set(value string) paymentTypeSetParam {
+
+	return paymentTypeSetParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of ID dynamically
+func (r paymentTypeQueryIDString) SetIfPresent(value *String) paymentTypeSetParam {
+	if value == nil {
+		return paymentTypeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r paymentTypeQueryIDString) Equals(value string) paymentTypeWithPrismaIDEqualsUniqueParam {
+
+	return paymentTypeWithPrismaIDEqualsUniqueParam{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) EqualsIfPresent(value *string) paymentTypeWithPrismaIDEqualsUniqueParam {
+	if value == nil {
+		return paymentTypeWithPrismaIDEqualsUniqueParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r paymentTypeQueryIDString) Order(direction SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: direction,
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) Cursor(cursor string) paymentTypeCursorParam {
+	return paymentTypeCursorParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) In(value []string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) InIfPresent(value []string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.In(value)
+}
+
+func (r paymentTypeQueryIDString) NotIn(value []string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) NotInIfPresent(value []string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.NotIn(value)
+}
+
+func (r paymentTypeQueryIDString) Lt(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) LtIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Lt(*value)
+}
+
+func (r paymentTypeQueryIDString) Lte(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) LteIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Lte(*value)
+}
+
+func (r paymentTypeQueryIDString) Gt(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) GtIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Gt(*value)
+}
+
+func (r paymentTypeQueryIDString) Gte(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) GteIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Gte(*value)
+}
+
+func (r paymentTypeQueryIDString) Contains(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) ContainsIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Contains(*value)
+}
+
+func (r paymentTypeQueryIDString) StartsWith(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) StartsWithIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r paymentTypeQueryIDString) EndsWith(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) EndsWithIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r paymentTypeQueryIDString) Search(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) SearchIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Search(*value)
+}
+
+func (r paymentTypeQueryIDString) Not(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryIDString) NotIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r paymentTypeQueryIDString) HasPrefix(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r paymentTypeQueryIDString) HasPrefixIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r paymentTypeQueryIDString) HasSuffix(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r paymentTypeQueryIDString) HasSuffixIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r paymentTypeQueryIDString) Field() paymentTypePrismaFields {
+	return paymentTypeFieldID
+}
+
+// base struct
+type paymentTypeQueryCodeString struct{}
+
+// Set the required value of Code
+func (r paymentTypeQueryCodeString) Set(value string) paymentTypeWithPrismaCodeSetParam {
+
+	return paymentTypeWithPrismaCodeSetParam{
+		data: builder.Field{
+			Name:  "code",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Code dynamically
+func (r paymentTypeQueryCodeString) SetIfPresent(value *String) paymentTypeWithPrismaCodeSetParam {
+	if value == nil {
+		return paymentTypeWithPrismaCodeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r paymentTypeQueryCodeString) Equals(value string) paymentTypeWithPrismaCodeEqualsUniqueParam {
+
+	return paymentTypeWithPrismaCodeEqualsUniqueParam{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) EqualsIfPresent(value *string) paymentTypeWithPrismaCodeEqualsUniqueParam {
+	if value == nil {
+		return paymentTypeWithPrismaCodeEqualsUniqueParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r paymentTypeQueryCodeString) Order(direction SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:  "code",
+			Value: direction,
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) Cursor(cursor string) paymentTypeCursorParam {
+	return paymentTypeCursorParam{
+		data: builder.Field{
+			Name:  "code",
+			Value: cursor,
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) In(value []string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) InIfPresent(value []string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.In(value)
+}
+
+func (r paymentTypeQueryCodeString) NotIn(value []string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) NotInIfPresent(value []string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.NotIn(value)
+}
+
+func (r paymentTypeQueryCodeString) Lt(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) LtIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Lt(*value)
+}
+
+func (r paymentTypeQueryCodeString) Lte(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) LteIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Lte(*value)
+}
+
+func (r paymentTypeQueryCodeString) Gt(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) GtIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Gt(*value)
+}
+
+func (r paymentTypeQueryCodeString) Gte(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) GteIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Gte(*value)
+}
+
+func (r paymentTypeQueryCodeString) Contains(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) ContainsIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Contains(*value)
+}
+
+func (r paymentTypeQueryCodeString) StartsWith(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) StartsWithIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r paymentTypeQueryCodeString) EndsWith(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) EndsWithIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r paymentTypeQueryCodeString) Search(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) SearchIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Search(*value)
+}
+
+func (r paymentTypeQueryCodeString) Not(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCodeString) NotIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r paymentTypeQueryCodeString) HasPrefix(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r paymentTypeQueryCodeString) HasPrefixIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r paymentTypeQueryCodeString) HasSuffix(value string) paymentTypeParamUnique {
+	return paymentTypeParamUnique{
+		data: builder.Field{
+			Name: "code",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r paymentTypeQueryCodeString) HasSuffixIfPresent(value *string) paymentTypeParamUnique {
+	if value == nil {
+		return paymentTypeParamUnique{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r paymentTypeQueryCodeString) Field() paymentTypePrismaFields {
+	return paymentTypeFieldCode
+}
+
+// base struct
+type paymentTypeQueryNameString struct{}
+
+// Set the required value of Name
+func (r paymentTypeQueryNameString) Set(value string) paymentTypeWithPrismaNameSetParam {
+
+	return paymentTypeWithPrismaNameSetParam{
+		data: builder.Field{
+			Name:  "name",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Name dynamically
+func (r paymentTypeQueryNameString) SetIfPresent(value *String) paymentTypeWithPrismaNameSetParam {
+	if value == nil {
+		return paymentTypeWithPrismaNameSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r paymentTypeQueryNameString) Equals(value string) paymentTypeWithPrismaNameEqualsParam {
+
+	return paymentTypeWithPrismaNameEqualsParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) EqualsIfPresent(value *string) paymentTypeWithPrismaNameEqualsParam {
+	if value == nil {
+		return paymentTypeWithPrismaNameEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r paymentTypeQueryNameString) Order(direction SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:  "name",
+			Value: direction,
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) Cursor(cursor string) paymentTypeCursorParam {
+	return paymentTypeCursorParam{
+		data: builder.Field{
+			Name:  "name",
+			Value: cursor,
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) In(value []string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) InIfPresent(value []string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r paymentTypeQueryNameString) NotIn(value []string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) NotInIfPresent(value []string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r paymentTypeQueryNameString) Lt(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) LtIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r paymentTypeQueryNameString) Lte(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) LteIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r paymentTypeQueryNameString) Gt(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) GtIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r paymentTypeQueryNameString) Gte(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) GteIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r paymentTypeQueryNameString) Contains(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) ContainsIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r paymentTypeQueryNameString) StartsWith(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) StartsWithIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r paymentTypeQueryNameString) EndsWith(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) EndsWithIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r paymentTypeQueryNameString) Search(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) SearchIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r paymentTypeQueryNameString) Not(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryNameString) NotIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r paymentTypeQueryNameString) HasPrefix(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r paymentTypeQueryNameString) HasPrefixIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r paymentTypeQueryNameString) HasSuffix(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "name",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r paymentTypeQueryNameString) HasSuffixIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r paymentTypeQueryNameString) Field() paymentTypePrismaFields {
+	return paymentTypeFieldName
+}
+
+// base struct
+type paymentTypeQueryCreatedAtDateTime struct{}
+
+// Set the required value of CreatedAt
+func (r paymentTypeQueryCreatedAtDateTime) Set(value DateTime) paymentTypeSetParam {
+
+	return paymentTypeSetParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of CreatedAt dynamically
+func (r paymentTypeQueryCreatedAtDateTime) SetIfPresent(value *DateTime) paymentTypeSetParam {
+	if value == nil {
+		return paymentTypeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Equals(value DateTime) paymentTypeWithPrismaCreatedAtEqualsParam {
+
+	return paymentTypeWithPrismaCreatedAtEqualsParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) EqualsIfPresent(value *DateTime) paymentTypeWithPrismaCreatedAtEqualsParam {
+	if value == nil {
+		return paymentTypeWithPrismaCreatedAtEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Order(direction SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: direction,
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Cursor(cursor DateTime) paymentTypeCursorParam {
+	return paymentTypeCursorParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: cursor,
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) In(value []DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) InIfPresent(value []DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) NotIn(value []DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) NotInIfPresent(value []DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Lt(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) LtIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Lte(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) LteIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Gt(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) GtIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Gte(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) GteIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Not(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) NotIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r paymentTypeQueryCreatedAtDateTime) Before(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r paymentTypeQueryCreatedAtDateTime) BeforeIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Before(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r paymentTypeQueryCreatedAtDateTime) After(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r paymentTypeQueryCreatedAtDateTime) AfterIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.After(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r paymentTypeQueryCreatedAtDateTime) BeforeEquals(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r paymentTypeQueryCreatedAtDateTime) BeforeEqualsIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.BeforeEquals(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r paymentTypeQueryCreatedAtDateTime) AfterEquals(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r paymentTypeQueryCreatedAtDateTime) AfterEqualsIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.AfterEquals(*value)
+}
+
+func (r paymentTypeQueryCreatedAtDateTime) Field() paymentTypePrismaFields {
+	return paymentTypeFieldCreatedAt
+}
+
+// base struct
+type paymentTypeQueryUpdatedAtDateTime struct{}
+
+// Set the required value of UpdatedAt
+func (r paymentTypeQueryUpdatedAtDateTime) Set(value DateTime) paymentTypeSetParam {
+
+	return paymentTypeSetParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of UpdatedAt dynamically
+func (r paymentTypeQueryUpdatedAtDateTime) SetIfPresent(value *DateTime) paymentTypeSetParam {
+	if value == nil {
+		return paymentTypeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Equals(value DateTime) paymentTypeWithPrismaUpdatedAtEqualsParam {
+
+	return paymentTypeWithPrismaUpdatedAtEqualsParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) EqualsIfPresent(value *DateTime) paymentTypeWithPrismaUpdatedAtEqualsParam {
+	if value == nil {
+		return paymentTypeWithPrismaUpdatedAtEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Order(direction SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: direction,
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Cursor(cursor DateTime) paymentTypeCursorParam {
+	return paymentTypeCursorParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: cursor,
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) In(value []DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) InIfPresent(value []DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) NotIn(value []DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) NotInIfPresent(value []DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Lt(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) LtIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Lte(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) LteIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Gt(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) GtIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Gte(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) GteIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Not(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) NotIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r paymentTypeQueryUpdatedAtDateTime) Before(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r paymentTypeQueryUpdatedAtDateTime) BeforeIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Before(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r paymentTypeQueryUpdatedAtDateTime) After(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r paymentTypeQueryUpdatedAtDateTime) AfterIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.After(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r paymentTypeQueryUpdatedAtDateTime) BeforeEquals(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r paymentTypeQueryUpdatedAtDateTime) BeforeEqualsIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.BeforeEquals(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r paymentTypeQueryUpdatedAtDateTime) AfterEquals(value DateTime) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r paymentTypeQueryUpdatedAtDateTime) AfterEqualsIfPresent(value *DateTime) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.AfterEquals(*value)
+}
+
+func (r paymentTypeQueryUpdatedAtDateTime) Field() paymentTypePrismaFields {
+	return paymentTypeFieldUpdatedAt
+}
+
+// base struct
+type paymentTypeQueryOrdersInternalOrder struct{}
+
+type paymentTypeQueryOrdersRelations struct{}
+
+// PaymentType -> Orders
+//
+// @relation
+// @required
+func (paymentTypeQueryOrdersRelations) Some(
+	params ...InternalOrderWhereParam,
+) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "orders",
+			Fields: []builder.Field{
+				{
+					Name:   "some",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// PaymentType -> Orders
+//
+// @relation
+// @required
+func (paymentTypeQueryOrdersRelations) Every(
+	params ...InternalOrderWhereParam,
+) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "orders",
+			Fields: []builder.Field{
+				{
+					Name:   "every",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// PaymentType -> Orders
+//
+// @relation
+// @required
+func (paymentTypeQueryOrdersRelations) None(
+	params ...InternalOrderWhereParam,
+) paymentTypeDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "orders",
+			Fields: []builder.Field{
+				{
+					Name:   "none",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (paymentTypeQueryOrdersRelations) Fetch(
+
+	params ...InternalOrderWhereParam,
+
+) paymentTypeToOrdersFindMany {
+	var v paymentTypeToOrdersFindMany
+
+	v.query.Operation = "query"
+	v.query.Method = "orders"
+	v.query.Outputs = internalOrderOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r paymentTypeQueryOrdersRelations) Link(
+	params ...InternalOrderWhereParam,
+) paymentTypeSetParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return paymentTypeSetParam{
+		data: builder.Field{
+			Name: "orders",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+
+					List:     true,
+					WrapList: true,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryOrdersRelations) Unlink(
+	params ...InternalOrderWhereParam,
+) paymentTypeSetParam {
+	var v paymentTypeSetParam
+
+	var fields []builder.Field
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+	v = paymentTypeSetParam{
+		data: builder.Field{
+			Name: "orders",
+			Fields: []builder.Field{
+				{
+					Name:     "disconnect",
+					List:     true,
+					WrapList: true,
+					Fields:   builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r paymentTypeQueryOrdersInternalOrder) Field() paymentTypePrismaFields {
+	return paymentTypeFieldOrders
+}
+
+// base struct
+type paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput struct{}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) Fields(value []PaymentTypeOrderByRelevanceFieldEnum) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "fields",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) FieldsIfPresent(value []PaymentTypeOrderByRelevanceFieldEnum) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Fields(value)
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) Sort(value SortOrder) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "sort",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) SortIfPresent(value *SortOrder) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Sort(*value)
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) Search(value string) paymentTypeDefaultParam {
+	return paymentTypeDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) SearchIfPresent(value *string) paymentTypeDefaultParam {
+	if value == nil {
+		return paymentTypeDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) Field() paymentTypePrismaFields {
+	return paymentTypeFieldRelevance
 }
 
 // --- template actions.gotpl ---
@@ -57761,6 +60404,7 @@ var internalOrderOutput = []builder.Output{
 	{Name: "buyer_uid"},
 	{Name: "quantity"},
 	{Name: "user_id"},
+	{Name: "payment_type_id"},
 	{Name: "status"},
 	{Name: "created_at"},
 	{Name: "updated_at"},
@@ -58397,6 +61041,162 @@ func (p internalOrderWithPrismaUserEqualsUniqueParam) userField()          {}
 
 func (internalOrderWithPrismaUserEqualsUniqueParam) unique() {}
 func (internalOrderWithPrismaUserEqualsUniqueParam) equals() {}
+
+type InternalOrderWithPrismaPaymentTypeIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	internalOrderModel()
+	paymentTypeIDField()
+}
+
+type InternalOrderWithPrismaPaymentTypeIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	paymentTypeIDField()
+}
+
+type internalOrderWithPrismaPaymentTypeIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDSetParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaPaymentTypeIDSetParam) paymentTypeIDField() {}
+
+type InternalOrderWithPrismaPaymentTypeIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	paymentTypeIDField()
+}
+
+type internalOrderWithPrismaPaymentTypeIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsParam) paymentTypeIDField() {}
+
+func (internalOrderWithPrismaPaymentTypeIDSetParam) settable()  {}
+func (internalOrderWithPrismaPaymentTypeIDEqualsParam) equals() {}
+
+type internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) internalOrderModel() {}
+func (p internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) paymentTypeIDField() {}
+
+func (internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) unique() {}
+func (internalOrderWithPrismaPaymentTypeIDEqualsUniqueParam) equals() {}
+
+type InternalOrderWithPrismaPaymentTypeEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	internalOrderModel()
+	paymentTypeField()
+}
+
+type InternalOrderWithPrismaPaymentTypeSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	paymentTypeField()
+}
+
+type internalOrderWithPrismaPaymentTypeSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeSetParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaPaymentTypeSetParam) paymentTypeField() {}
+
+type InternalOrderWithPrismaPaymentTypeWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	internalOrderModel()
+	paymentTypeField()
+}
+
+type internalOrderWithPrismaPaymentTypeEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsParam) internalOrderModel() {}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsParam) paymentTypeField() {}
+
+func (internalOrderWithPrismaPaymentTypeSetParam) settable()  {}
+func (internalOrderWithPrismaPaymentTypeEqualsParam) equals() {}
+
+type internalOrderWithPrismaPaymentTypeEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p internalOrderWithPrismaPaymentTypeEqualsUniqueParam) internalOrderModel() {}
+func (p internalOrderWithPrismaPaymentTypeEqualsUniqueParam) paymentTypeField()   {}
+
+func (internalOrderWithPrismaPaymentTypeEqualsUniqueParam) unique() {}
+func (internalOrderWithPrismaPaymentTypeEqualsUniqueParam) equals() {}
 
 type InternalOrderWithPrismaStatusEqualsSetParam interface {
 	field() builder.Field
@@ -60707,6 +63507,651 @@ func (p supplierOrderItemWithPrismaSupplierProductEqualsUniqueParam) supplierPro
 func (supplierOrderItemWithPrismaSupplierProductEqualsUniqueParam) unique() {}
 func (supplierOrderItemWithPrismaSupplierProductEqualsUniqueParam) equals() {}
 
+type paymentTypeActions struct {
+	// client holds the prisma client
+	client *PrismaClient
+}
+
+var paymentTypeOutput = []builder.Output{
+	{Name: "id"},
+	{Name: "code"},
+	{Name: "name"},
+	{Name: "created_at"},
+	{Name: "updated_at"},
+}
+
+type PaymentTypeRelationWith interface {
+	getQuery() builder.Query
+	with()
+	paymentTypeRelation()
+}
+
+type PaymentTypeWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+}
+
+type paymentTypeDefaultParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeDefaultParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeDefaultParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeDefaultParam) paymentTypeModel() {}
+
+type PaymentTypeOrderByParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+}
+
+type paymentTypeOrderByParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeOrderByParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeOrderByParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeOrderByParam) paymentTypeModel() {}
+
+type PaymentTypeCursorParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	isCursor()
+}
+
+type paymentTypeCursorParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeCursorParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeCursorParam) isCursor() {}
+
+func (p paymentTypeCursorParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeCursorParam) paymentTypeModel() {}
+
+type PaymentTypeParamUnique interface {
+	field() builder.Field
+	getQuery() builder.Query
+	unique()
+	paymentTypeModel()
+}
+
+type paymentTypeParamUnique struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeParamUnique) paymentTypeModel() {}
+
+func (paymentTypeParamUnique) unique() {}
+
+func (p paymentTypeParamUnique) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeParamUnique) getQuery() builder.Query {
+	return p.query
+}
+
+type PaymentTypeEqualsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+}
+
+type paymentTypeEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeEqualsParam) paymentTypeModel() {}
+
+func (paymentTypeEqualsParam) equals() {}
+
+func (p paymentTypeEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+type PaymentTypeEqualsUniqueWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	unique()
+	paymentTypeModel()
+}
+
+type paymentTypeEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeEqualsUniqueParam) paymentTypeModel() {}
+
+func (paymentTypeEqualsUniqueParam) unique() {}
+func (paymentTypeEqualsUniqueParam) equals() {}
+
+func (p paymentTypeEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+type PaymentTypeSetParam interface {
+	field() builder.Field
+	settable()
+	paymentTypeModel()
+}
+
+type paymentTypeSetParam struct {
+	data builder.Field
+}
+
+func (paymentTypeSetParam) settable() {}
+
+func (p paymentTypeSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeSetParam) paymentTypeModel() {}
+
+type PaymentTypeWithPrismaIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	idField()
+}
+
+type PaymentTypeWithPrismaIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	idField()
+}
+
+type paymentTypeWithPrismaIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaIDSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaIDSetParam) idField() {}
+
+type PaymentTypeWithPrismaIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	idField()
+}
+
+type paymentTypeWithPrismaIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaIDEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaIDEqualsParam) idField() {}
+
+func (paymentTypeWithPrismaIDSetParam) settable()  {}
+func (paymentTypeWithPrismaIDEqualsParam) equals() {}
+
+type paymentTypeWithPrismaIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaIDEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaIDEqualsUniqueParam) idField()          {}
+
+func (paymentTypeWithPrismaIDEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaIDEqualsUniqueParam) equals() {}
+
+type PaymentTypeWithPrismaCodeEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	codeField()
+}
+
+type PaymentTypeWithPrismaCodeSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	codeField()
+}
+
+type paymentTypeWithPrismaCodeSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCodeSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCodeSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCodeSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaCodeSetParam) codeField() {}
+
+type PaymentTypeWithPrismaCodeWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	codeField()
+}
+
+type paymentTypeWithPrismaCodeEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCodeEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCodeEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCodeEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaCodeEqualsParam) codeField() {}
+
+func (paymentTypeWithPrismaCodeSetParam) settable()  {}
+func (paymentTypeWithPrismaCodeEqualsParam) equals() {}
+
+type paymentTypeWithPrismaCodeEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCodeEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCodeEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCodeEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaCodeEqualsUniqueParam) codeField()        {}
+
+func (paymentTypeWithPrismaCodeEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaCodeEqualsUniqueParam) equals() {}
+
+type PaymentTypeWithPrismaNameEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	nameField()
+}
+
+type PaymentTypeWithPrismaNameSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	nameField()
+}
+
+type paymentTypeWithPrismaNameSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaNameSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaNameSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaNameSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaNameSetParam) nameField() {}
+
+type PaymentTypeWithPrismaNameWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	nameField()
+}
+
+type paymentTypeWithPrismaNameEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaNameEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaNameEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaNameEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaNameEqualsParam) nameField() {}
+
+func (paymentTypeWithPrismaNameSetParam) settable()  {}
+func (paymentTypeWithPrismaNameEqualsParam) equals() {}
+
+type paymentTypeWithPrismaNameEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaNameEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaNameEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaNameEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaNameEqualsUniqueParam) nameField()        {}
+
+func (paymentTypeWithPrismaNameEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaNameEqualsUniqueParam) equals() {}
+
+type PaymentTypeWithPrismaCreatedAtEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	createdAtField()
+}
+
+type PaymentTypeWithPrismaCreatedAtSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	createdAtField()
+}
+
+type paymentTypeWithPrismaCreatedAtSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCreatedAtSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCreatedAtSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCreatedAtSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaCreatedAtSetParam) createdAtField() {}
+
+type PaymentTypeWithPrismaCreatedAtWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	createdAtField()
+}
+
+type paymentTypeWithPrismaCreatedAtEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsParam) createdAtField() {}
+
+func (paymentTypeWithPrismaCreatedAtSetParam) settable()  {}
+func (paymentTypeWithPrismaCreatedAtEqualsParam) equals() {}
+
+type paymentTypeWithPrismaCreatedAtEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaCreatedAtEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaCreatedAtEqualsUniqueParam) createdAtField()   {}
+
+func (paymentTypeWithPrismaCreatedAtEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaCreatedAtEqualsUniqueParam) equals() {}
+
+type PaymentTypeWithPrismaUpdatedAtEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	updatedAtField()
+}
+
+type PaymentTypeWithPrismaUpdatedAtSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	updatedAtField()
+}
+
+type paymentTypeWithPrismaUpdatedAtSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaUpdatedAtSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaUpdatedAtSetParam) updatedAtField() {}
+
+type PaymentTypeWithPrismaUpdatedAtWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	updatedAtField()
+}
+
+type paymentTypeWithPrismaUpdatedAtEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsParam) updatedAtField() {}
+
+func (paymentTypeWithPrismaUpdatedAtSetParam) settable()  {}
+func (paymentTypeWithPrismaUpdatedAtEqualsParam) equals() {}
+
+type paymentTypeWithPrismaUpdatedAtEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) updatedAtField()   {}
+
+func (paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaUpdatedAtEqualsUniqueParam) equals() {}
+
+type PaymentTypeWithPrismaOrdersEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	paymentTypeModel()
+	ordersField()
+}
+
+type PaymentTypeWithPrismaOrdersSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	ordersField()
+}
+
+type paymentTypeWithPrismaOrdersSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaOrdersSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaOrdersSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaOrdersSetParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaOrdersSetParam) ordersField() {}
+
+type PaymentTypeWithPrismaOrdersWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	paymentTypeModel()
+	ordersField()
+}
+
+type paymentTypeWithPrismaOrdersEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsParam) paymentTypeModel() {}
+
+func (p paymentTypeWithPrismaOrdersEqualsParam) ordersField() {}
+
+func (paymentTypeWithPrismaOrdersSetParam) settable()  {}
+func (paymentTypeWithPrismaOrdersEqualsParam) equals() {}
+
+type paymentTypeWithPrismaOrdersEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeWithPrismaOrdersEqualsUniqueParam) paymentTypeModel() {}
+func (p paymentTypeWithPrismaOrdersEqualsUniqueParam) ordersField()      {}
+
+func (paymentTypeWithPrismaOrdersEqualsUniqueParam) unique() {}
+func (paymentTypeWithPrismaOrdersEqualsUniqueParam) equals() {}
+
 // --- template create.gotpl ---
 
 // Creates a single user.
@@ -61712,6 +65157,76 @@ func (r supplierOrderItemCreateOne) Exec(ctx context.Context) (*SupplierOrderIte
 
 func (r supplierOrderItemCreateOne) Tx() SupplierOrderItemUniqueTxResult {
 	v := newSupplierOrderItemUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+// Creates a single paymentType.
+func (r paymentTypeActions) CreateOne(
+	_code PaymentTypeWithPrismaCodeSetParam,
+	_name PaymentTypeWithPrismaNameSetParam,
+
+	optional ...PaymentTypeSetParam,
+) paymentTypeCreateOne {
+	var v paymentTypeCreateOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "createOne"
+	v.query.Model = "PaymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	var fields []builder.Field
+
+	fields = append(fields, _code.field())
+	fields = append(fields, _name.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+func (r paymentTypeCreateOne) With(params ...PaymentTypeRelationWith) paymentTypeCreateOne {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+type paymentTypeCreateOne struct {
+	query builder.Query
+}
+
+func (p paymentTypeCreateOne) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p paymentTypeCreateOne) paymentTypeModel() {}
+
+func (r paymentTypeCreateOne) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeCreateOne) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
 	return v
@@ -82719,6 +86234,560 @@ func (r internalOrderToUserDeleteMany) Tx() InternalOrderManyTxResult {
 	return v
 }
 
+type internalOrderToPaymentTypeFindUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindUnique) with()                  {}
+func (r internalOrderToPaymentTypeFindUnique) internalOrderModel()    {}
+func (r internalOrderToPaymentTypeFindUnique) internalOrderRelation() {}
+
+func (r internalOrderToPaymentTypeFindUnique) With(params ...PaymentTypeRelationWith) internalOrderToPaymentTypeFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindUnique) Select(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindUnique) Omit(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindUnique) Exec(ctx context.Context) (
+	*InternalOrderModel,
+	error,
+) {
+	var v *InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToPaymentTypeFindUnique) ExecInner(ctx context.Context) (
+	*InnerInternalOrder,
+	error,
+) {
+	var v *InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToPaymentTypeFindUnique) Update(params ...InternalOrderSetParam) internalOrderToPaymentTypeUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "InternalOrder"
+
+	var v internalOrderToPaymentTypeUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type internalOrderToPaymentTypeUpdateUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeUpdateUnique) internalOrderModel() {}
+
+func (r internalOrderToPaymentTypeUpdateUnique) Exec(ctx context.Context) (*InternalOrderModel, error) {
+	var v InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToPaymentTypeUpdateUnique) Tx() InternalOrderUniqueTxResult {
+	v := newInternalOrderUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r internalOrderToPaymentTypeFindUnique) Delete() internalOrderToPaymentTypeDeleteUnique {
+	var v internalOrderToPaymentTypeDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "InternalOrder"
+
+	return v
+}
+
+type internalOrderToPaymentTypeDeleteUnique struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p internalOrderToPaymentTypeDeleteUnique) internalOrderModel() {}
+
+func (r internalOrderToPaymentTypeDeleteUnique) Exec(ctx context.Context) (*InternalOrderModel, error) {
+	var v InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToPaymentTypeDeleteUnique) Tx() InternalOrderUniqueTxResult {
+	v := newInternalOrderUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type internalOrderToPaymentTypeFindFirst struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindFirst) with()                  {}
+func (r internalOrderToPaymentTypeFindFirst) internalOrderModel()    {}
+func (r internalOrderToPaymentTypeFindFirst) internalOrderRelation() {}
+
+func (r internalOrderToPaymentTypeFindFirst) With(params ...PaymentTypeRelationWith) internalOrderToPaymentTypeFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Select(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Omit(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) OrderBy(params ...PaymentTypeOrderByParam) internalOrderToPaymentTypeFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Skip(count int) internalOrderToPaymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Take(count int) internalOrderToPaymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Cursor(cursor InternalOrderCursorParam) internalOrderToPaymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindFirst) Exec(ctx context.Context) (
+	*InternalOrderModel,
+	error,
+) {
+	var v *InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToPaymentTypeFindFirst) ExecInner(ctx context.Context) (
+	*InnerInternalOrder,
+	error,
+) {
+	var v *InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type internalOrderToPaymentTypeFindMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeFindMany) with()                  {}
+func (r internalOrderToPaymentTypeFindMany) internalOrderModel()    {}
+func (r internalOrderToPaymentTypeFindMany) internalOrderRelation() {}
+
+func (r internalOrderToPaymentTypeFindMany) With(params ...PaymentTypeRelationWith) internalOrderToPaymentTypeFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Select(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Omit(params ...internalOrderPrismaFields) internalOrderToPaymentTypeFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range internalOrderOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) OrderBy(params ...PaymentTypeOrderByParam) internalOrderToPaymentTypeFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Skip(count int) internalOrderToPaymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Take(count int) internalOrderToPaymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Cursor(cursor InternalOrderCursorParam) internalOrderToPaymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r internalOrderToPaymentTypeFindMany) Exec(ctx context.Context) (
+	[]InternalOrderModel,
+	error,
+) {
+	var v []InternalOrderModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToPaymentTypeFindMany) ExecInner(ctx context.Context) (
+	[]InnerInternalOrder,
+	error,
+) {
+	var v []InnerInternalOrder
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r internalOrderToPaymentTypeFindMany) Update(params ...InternalOrderSetParam) internalOrderToPaymentTypeUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "InternalOrder"
+
+	r.query.Outputs = countOutput
+
+	var v internalOrderToPaymentTypeUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type internalOrderToPaymentTypeUpdateMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r internalOrderToPaymentTypeUpdateMany) internalOrderModel() {}
+
+func (r internalOrderToPaymentTypeUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToPaymentTypeUpdateMany) Tx() InternalOrderManyTxResult {
+	v := newInternalOrderManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r internalOrderToPaymentTypeFindMany) Delete() internalOrderToPaymentTypeDeleteMany {
+	var v internalOrderToPaymentTypeDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "InternalOrder"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type internalOrderToPaymentTypeDeleteMany struct {
+	query builder.Query
+}
+
+func (r internalOrderToPaymentTypeDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p internalOrderToPaymentTypeDeleteMany) internalOrderModel() {}
+
+func (r internalOrderToPaymentTypeDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r internalOrderToPaymentTypeDeleteMany) Tx() InternalOrderManyTxResult {
+	v := newInternalOrderManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
 type internalOrderToProductFindUnique struct {
 	query builder.Query
 }
@@ -88547,6 +92616,1210 @@ func (r supplierOrderItemDeleteMany) Tx() SupplierOrderItemManyTxResult {
 	return v
 }
 
+type paymentTypeToOrdersFindUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindUnique) with()                {}
+func (r paymentTypeToOrdersFindUnique) paymentTypeModel()    {}
+func (r paymentTypeToOrdersFindUnique) paymentTypeRelation() {}
+
+func (r paymentTypeToOrdersFindUnique) With(params ...InternalOrderRelationWith) paymentTypeToOrdersFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindUnique) Select(params ...paymentTypePrismaFields) paymentTypeToOrdersFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindUnique) Omit(params ...paymentTypePrismaFields) paymentTypeToOrdersFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindUnique) Exec(ctx context.Context) (
+	*PaymentTypeModel,
+	error,
+) {
+	var v *PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeToOrdersFindUnique) ExecInner(ctx context.Context) (
+	*InnerPaymentType,
+	error,
+) {
+	var v *InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeToOrdersFindUnique) Update(params ...PaymentTypeSetParam) paymentTypeToOrdersUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "PaymentType"
+
+	var v paymentTypeToOrdersUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type paymentTypeToOrdersUpdateUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersUpdateUnique) paymentTypeModel() {}
+
+func (r paymentTypeToOrdersUpdateUnique) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeToOrdersUpdateUnique) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r paymentTypeToOrdersFindUnique) Delete() paymentTypeToOrdersDeleteUnique {
+	var v paymentTypeToOrdersDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "PaymentType"
+
+	return v
+}
+
+type paymentTypeToOrdersDeleteUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p paymentTypeToOrdersDeleteUnique) paymentTypeModel() {}
+
+func (r paymentTypeToOrdersDeleteUnique) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeToOrdersDeleteUnique) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type paymentTypeToOrdersFindFirst struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindFirst) with()                {}
+func (r paymentTypeToOrdersFindFirst) paymentTypeModel()    {}
+func (r paymentTypeToOrdersFindFirst) paymentTypeRelation() {}
+
+func (r paymentTypeToOrdersFindFirst) With(params ...InternalOrderRelationWith) paymentTypeToOrdersFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Select(params ...paymentTypePrismaFields) paymentTypeToOrdersFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Omit(params ...paymentTypePrismaFields) paymentTypeToOrdersFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) OrderBy(params ...InternalOrderOrderByParam) paymentTypeToOrdersFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Skip(count int) paymentTypeToOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Take(count int) paymentTypeToOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Cursor(cursor PaymentTypeCursorParam) paymentTypeToOrdersFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindFirst) Exec(ctx context.Context) (
+	*PaymentTypeModel,
+	error,
+) {
+	var v *PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeToOrdersFindFirst) ExecInner(ctx context.Context) (
+	*InnerPaymentType,
+	error,
+) {
+	var v *InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type paymentTypeToOrdersFindMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersFindMany) with()                {}
+func (r paymentTypeToOrdersFindMany) paymentTypeModel()    {}
+func (r paymentTypeToOrdersFindMany) paymentTypeRelation() {}
+
+func (r paymentTypeToOrdersFindMany) With(params ...InternalOrderRelationWith) paymentTypeToOrdersFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Select(params ...paymentTypePrismaFields) paymentTypeToOrdersFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Omit(params ...paymentTypePrismaFields) paymentTypeToOrdersFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) OrderBy(params ...InternalOrderOrderByParam) paymentTypeToOrdersFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Skip(count int) paymentTypeToOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Take(count int) paymentTypeToOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Cursor(cursor PaymentTypeCursorParam) paymentTypeToOrdersFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r paymentTypeToOrdersFindMany) Exec(ctx context.Context) (
+	[]PaymentTypeModel,
+	error,
+) {
+	var v []PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeToOrdersFindMany) ExecInner(ctx context.Context) (
+	[]InnerPaymentType,
+	error,
+) {
+	var v []InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeToOrdersFindMany) Update(params ...PaymentTypeSetParam) paymentTypeToOrdersUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "PaymentType"
+
+	r.query.Outputs = countOutput
+
+	var v paymentTypeToOrdersUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type paymentTypeToOrdersUpdateMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeToOrdersUpdateMany) paymentTypeModel() {}
+
+func (r paymentTypeToOrdersUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeToOrdersUpdateMany) Tx() PaymentTypeManyTxResult {
+	v := newPaymentTypeManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r paymentTypeToOrdersFindMany) Delete() paymentTypeToOrdersDeleteMany {
+	var v paymentTypeToOrdersDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "PaymentType"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type paymentTypeToOrdersDeleteMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeToOrdersDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p paymentTypeToOrdersDeleteMany) paymentTypeModel() {}
+
+func (r paymentTypeToOrdersDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeToOrdersDeleteMany) Tx() PaymentTypeManyTxResult {
+	v := newPaymentTypeManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type paymentTypeFindUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindUnique) with()                {}
+func (r paymentTypeFindUnique) paymentTypeModel()    {}
+func (r paymentTypeFindUnique) paymentTypeRelation() {}
+
+func (r paymentTypeActions) FindUnique(
+	params PaymentTypeEqualsUniqueWhereParam,
+) paymentTypeFindUnique {
+	var v paymentTypeFindUnique
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findUnique"
+
+	v.query.Model = "PaymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r paymentTypeFindUnique) With(params ...PaymentTypeRelationWith) paymentTypeFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeFindUnique) Select(params ...paymentTypePrismaFields) paymentTypeFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindUnique) Omit(params ...paymentTypePrismaFields) paymentTypeFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindUnique) Exec(ctx context.Context) (
+	*PaymentTypeModel,
+	error,
+) {
+	var v *PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeFindUnique) ExecInner(ctx context.Context) (
+	*InnerPaymentType,
+	error,
+) {
+	var v *InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeFindUnique) Update(params ...PaymentTypeSetParam) paymentTypeUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "PaymentType"
+
+	var v paymentTypeUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type paymentTypeUpdateUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeUpdateUnique) paymentTypeModel() {}
+
+func (r paymentTypeUpdateUnique) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeUpdateUnique) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r paymentTypeFindUnique) Delete() paymentTypeDeleteUnique {
+	var v paymentTypeDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "PaymentType"
+
+	return v
+}
+
+type paymentTypeDeleteUnique struct {
+	query builder.Query
+}
+
+func (r paymentTypeDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p paymentTypeDeleteUnique) paymentTypeModel() {}
+
+func (r paymentTypeDeleteUnique) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeDeleteUnique) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type paymentTypeFindFirst struct {
+	query builder.Query
+}
+
+func (r paymentTypeFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindFirst) with()                {}
+func (r paymentTypeFindFirst) paymentTypeModel()    {}
+func (r paymentTypeFindFirst) paymentTypeRelation() {}
+
+func (r paymentTypeActions) FindFirst(
+	params ...PaymentTypeWhereParam,
+) paymentTypeFindFirst {
+	var v paymentTypeFindFirst
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findFirst"
+
+	v.query.Model = "PaymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r paymentTypeFindFirst) With(params ...PaymentTypeRelationWith) paymentTypeFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeFindFirst) Select(params ...paymentTypePrismaFields) paymentTypeFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindFirst) Omit(params ...paymentTypePrismaFields) paymentTypeFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindFirst) OrderBy(params ...PaymentTypeOrderByParam) paymentTypeFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r paymentTypeFindFirst) Skip(count int) paymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeFindFirst) Take(count int) paymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeFindFirst) Cursor(cursor PaymentTypeCursorParam) paymentTypeFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r paymentTypeFindFirst) Exec(ctx context.Context) (
+	*PaymentTypeModel,
+	error,
+) {
+	var v *PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeFindFirst) ExecInner(ctx context.Context) (
+	*InnerPaymentType,
+	error,
+) {
+	var v *InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type paymentTypeFindMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeFindMany) with()                {}
+func (r paymentTypeFindMany) paymentTypeModel()    {}
+func (r paymentTypeFindMany) paymentTypeRelation() {}
+
+func (r paymentTypeActions) FindMany(
+	params ...PaymentTypeWhereParam,
+) paymentTypeFindMany {
+	var v paymentTypeFindMany
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findMany"
+
+	v.query.Model = "PaymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r paymentTypeFindMany) With(params ...PaymentTypeRelationWith) paymentTypeFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r paymentTypeFindMany) Select(params ...paymentTypePrismaFields) paymentTypeFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindMany) Omit(params ...paymentTypePrismaFields) paymentTypeFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range paymentTypeOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r paymentTypeFindMany) OrderBy(params ...PaymentTypeOrderByParam) paymentTypeFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r paymentTypeFindMany) Skip(count int) paymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeFindMany) Take(count int) paymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r paymentTypeFindMany) Cursor(cursor PaymentTypeCursorParam) paymentTypeFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r paymentTypeFindMany) Exec(ctx context.Context) (
+	[]PaymentTypeModel,
+	error,
+) {
+	var v []PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeFindMany) ExecInner(ctx context.Context) (
+	[]InnerPaymentType,
+	error,
+) {
+	var v []InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r paymentTypeFindMany) Update(params ...PaymentTypeSetParam) paymentTypeUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "PaymentType"
+
+	r.query.Outputs = countOutput
+
+	var v paymentTypeUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type paymentTypeUpdateMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeUpdateMany) paymentTypeModel() {}
+
+func (r paymentTypeUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeUpdateMany) Tx() PaymentTypeManyTxResult {
+	v := newPaymentTypeManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r paymentTypeFindMany) Delete() paymentTypeDeleteMany {
+	var v paymentTypeDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "PaymentType"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type paymentTypeDeleteMany struct {
+	query builder.Query
+}
+
+func (r paymentTypeDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p paymentTypeDeleteMany) paymentTypeModel() {}
+
+func (r paymentTypeDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeDeleteMany) Tx() PaymentTypeManyTxResult {
+	v := newPaymentTypeManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
 // --- template transaction.gotpl ---
 
 func newUserUniqueTxResult() UserUniqueTxResult {
@@ -89215,6 +94488,54 @@ func (p SupplierOrderItemManyTxResult) ExtractQuery() builder.Query {
 func (p SupplierOrderItemManyTxResult) IsTx() {}
 
 func (r SupplierOrderItemManyTxResult) Result() (v *BatchResult) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newPaymentTypeUniqueTxResult() PaymentTypeUniqueTxResult {
+	return PaymentTypeUniqueTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type PaymentTypeUniqueTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p PaymentTypeUniqueTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p PaymentTypeUniqueTxResult) IsTx() {}
+
+func (r PaymentTypeUniqueTxResult) Result() (v *PaymentTypeModel) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newPaymentTypeManyTxResult() PaymentTypeManyTxResult {
+	return PaymentTypeManyTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type PaymentTypeManyTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p PaymentTypeManyTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p PaymentTypeManyTxResult) IsTx() {}
+
+func (r PaymentTypeManyTxResult) Result() (v *BatchResult) {
 	if err := r.result.Get(r.query.TxResult, &v); err != nil {
 		panic(err)
 	}
@@ -91281,6 +96602,149 @@ func (r supplierOrderItemUpsertOne) Tx() SupplierOrderItemUniqueTxResult {
 	return v
 }
 
+type paymentTypeUpsertOne struct {
+	query builder.Query
+}
+
+func (r paymentTypeUpsertOne) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeUpsertOne) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeUpsertOne) with()                {}
+func (r paymentTypeUpsertOne) paymentTypeModel()    {}
+func (r paymentTypeUpsertOne) paymentTypeRelation() {}
+
+func (r paymentTypeActions) UpsertOne(
+	params PaymentTypeEqualsUniqueWhereParam,
+) paymentTypeUpsertOne {
+	var v paymentTypeUpsertOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "upsertOne"
+	v.query.Model = "PaymentType"
+	v.query.Outputs = paymentTypeOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r paymentTypeUpsertOne) Create(
+
+	_code PaymentTypeWithPrismaCodeSetParam,
+	_name PaymentTypeWithPrismaNameSetParam,
+
+	optional ...PaymentTypeSetParam,
+) paymentTypeUpsertOne {
+	var v paymentTypeUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _code.field())
+	fields = append(fields, _name.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r paymentTypeUpsertOne) Update(
+	params ...PaymentTypeSetParam,
+) paymentTypeUpsertOne {
+	var v paymentTypeUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r paymentTypeUpsertOne) CreateOrUpdate(
+
+	_code PaymentTypeWithPrismaCodeSetParam,
+	_name PaymentTypeWithPrismaNameSetParam,
+
+	optional ...PaymentTypeSetParam,
+) paymentTypeUpsertOne {
+	var v paymentTypeUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _code.field())
+	fields = append(fields, _name.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r paymentTypeUpsertOne) Exec(ctx context.Context) (*PaymentTypeModel, error) {
+	var v PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r paymentTypeUpsertOne) Tx() PaymentTypeUniqueTxResult {
+	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
 // --- template raw.gotpl ---
 
 type userAggregateRaw struct {
@@ -92411,6 +97875,87 @@ func (r supplierOrderItemAggregateRaw) Exec(ctx context.Context) ([]SupplierOrde
 
 func (r supplierOrderItemAggregateRaw) ExecInner(ctx context.Context) ([]InnerSupplierOrderItem, error) {
 	var v []InnerSupplierOrderItem
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+type paymentTypeAggregateRaw struct {
+	query builder.Query
+}
+
+func (r paymentTypeAggregateRaw) getQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeAggregateRaw) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r paymentTypeAggregateRaw) with()                {}
+func (r paymentTypeAggregateRaw) paymentTypeModel()    {}
+func (r paymentTypeAggregateRaw) paymentTypeRelation() {}
+
+func (r paymentTypeActions) FindRaw(filter interface{}, options ...interface{}) paymentTypeAggregateRaw {
+	var v paymentTypeAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "findRaw"
+	v.query.Operation = "query"
+	v.query.Model = "PaymentType"
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "filter",
+		Value: fmt.Sprintf("%v", filter),
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r paymentTypeActions) AggregateRaw(pipeline []interface{}, options ...interface{}) paymentTypeAggregateRaw {
+	var v paymentTypeAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "aggregateRaw"
+	v.query.Operation = "query"
+	v.query.Model = "PaymentType"
+
+	parsedPip := []interface{}{}
+	for _, p := range pipeline {
+		parsedPip = append(parsedPip, fmt.Sprintf("%v", p))
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "pipeline",
+		Value: parsedPip,
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r paymentTypeAggregateRaw) Exec(ctx context.Context) ([]PaymentTypeModel, error) {
+	var v []PaymentTypeModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (r paymentTypeAggregateRaw) ExecInner(ctx context.Context) ([]InnerPaymentType, error) {
+	var v []InnerPaymentType
 	if err := r.query.Exec(ctx, &v); err != nil {
 		return nil, err
 	}

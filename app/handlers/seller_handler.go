@@ -60,8 +60,8 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	webhookVal, _ := user.WebhookURL()
 	statusVal, _ := user.Status()
 	
-	// [BARU] Handle Nullable Telegram Chat ID
-	telegramChatID, _ := user.TelegramChatID() // <--- Ambil dari database
+	// Handle Nullable Telegram Chat ID
+	telegramChatID, _ := user.TelegramChatID()
 
 	// Ambil Role Name
 	roleName := "-"
@@ -77,7 +77,7 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 			"email":            user.Email,
 			"phone":            phoneVal,
 			"webhook_url":      webhookVal,
-			"telegram_chat_id": telegramChatID, // <--- Return Field Baru
+			"telegram_chat_id": telegramChatID,
 			"api_key":          keyData.APIKey,
 			"status":           statusVal,
 			"role_name":        roleName,
@@ -195,11 +195,12 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 // ==========================================
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	type Req struct {
-		ProductID   string `json:"product_id"`
-		Destination string `json:"destination"`
-		RefID       string `json:"ref_id"`
-		SupplierID  string `json:"supplier_id"`
-		WebhookURL  string `json:"webhook_url"` // Opsional
+		ProductID     string `json:"product_id"`
+		Destination   string `json:"destination"`
+		RefID         string `json:"ref_id"`
+		SupplierID    string `json:"supplier_id"`
+		WebhookURL    string `json:"webhook_url"` // Opsional
+		PaymentTypeID string `json:"payment_type_id"` // [BARU] Tambahan field metode pembayaran
 	}
 
 	req := new(Req)
@@ -207,8 +208,9 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 	}
 
-	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, dan supplier_id required"})
+	// [PERBAIKAN] Validasi bertambah mengecek PaymentTypeID
+	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" || req.PaymentTypeID == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, supplier_id, dan payment_type_id required"})
 	}
 
 	ctx := c.Request().Context()
@@ -248,12 +250,13 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	// C. INSERT INTERNAL ORDER (Status: Pending)
+	// [PERBAIKAN] Tambahkan kolom payment_type_id ke dalam Query ExecuteRaw
 	internalOrderID := uuid.New().String()
 	_, err = h.DB.Prisma.ExecuteRaw(
 		`INSERT INTO internal_order 
-         (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
-		internalOrderID, realProductUUID, userID, req.Destination, 1,
+         (id, product_id, user_id, payment_type_id, buyer_uid, quantity, status, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
+		internalOrderID, realProductUUID, userID, req.PaymentTypeID, req.Destination, 1,
 	).Exec(ctx)
 
 	if err != nil {
@@ -325,16 +328,20 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 			}
 		}
 
+		// [BARU] Ambil Data Payment Type ID jika diperlukan riwayatnya
+		paymentTypeID, _ := o.PaymentTypeID()
+
 		item := map[string]interface{}{
-			"id":           o.ID,
-			"ref_id":       o.ID,
-			"product_name": productName,
-			"destination":  o.BuyerUID,
-			"quantity":     o.Quantity,
-			"status":       o.Status,
-			"sn":           sn,
-			"created_at":   o.CreatedAt,
-			"price":        productPrice,
+			"id":              o.ID,
+			"ref_id":          o.ID,
+			"product_name":    productName,
+			"destination":     o.BuyerUID,
+			"payment_type_id": paymentTypeID, // [BARU] Ditambahkan ke payload list riwayat
+			"quantity":        o.Quantity,
+			"status":          o.Status,
+			"sn":              sn,
+			"created_at":      o.CreatedAt,
+			"price":           productPrice,
 		}
 
 		response = append(response, item)

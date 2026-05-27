@@ -18,7 +18,8 @@ func Init(
 	supplierProductHandler *handlers.SupplierProductHandler,
 	productHandler *handlers.ProductHandler,
 	recipeHandler *handlers.RecipeHandler,
-	telegramHandler *handlers.TelegramHandler, // Tambahan TelegramHandler
+	telegramHandler *handlers.TelegramHandler,
+	paymentTypeHandler *handlers.PaymentTypeHandler,
 ) {
 	// Grouping v1
 	v1 := e.Group("/api/v1")
@@ -34,7 +35,7 @@ func Init(
 	v1.POST("/verify", authHandler.VerifyUser) 
 	v1.GET("/users", authHandler.GetUsers) 
 
-	// [BARU] Route untuk Telegram Webhook
+	// Route untuk Telegram Webhook
 	v1.POST("/webhook/telegram", telegramHandler.HandleWebhook)
 
 	// ==========================================
@@ -45,9 +46,7 @@ func Init(
 
 	// --- 1. User & Auth Management ---
 	protected.GET("/auth/me", authHandler.Me)
-
-	// [BARU] Delete User (Admin Only - via query param ?id=...)
-	protected.DELETE("/users", authHandler.DeleteUser)
+	protected.DELETE("/users", authHandler.DeleteUser) // Delete User (Admin Only - via query param ?id=...)
 
 	// --- 3. Internal Products (CRUD) ---
 	protected.POST("/products", productHandler.Create)
@@ -60,13 +59,13 @@ func Init(
 	protected.GET("/suppliers", supplierHandler.GetAll)
 	protected.PUT("/suppliers/:id", supplierHandler.Update)
 	protected.DELETE("/suppliers/:id", supplierHandler.Delete)
+	protected.POST("/suppliers/check-connection", supplierHandler.CheckConnection)
 
 	// --- 5. Supplier Products (CRUD) ---
 	protected.POST("/supplier-products", supplierProductHandler.Create)
 	protected.GET("/supplier-products", supplierProductHandler.GetAll)
 	protected.PUT("/supplier-products/:id", supplierProductHandler.Update)
 	protected.DELETE("/supplier-products/:id", supplierProductHandler.Delete)
-	protected.POST("/suppliers/check-connection", supplierHandler.CheckConnection)
 
 	// --- 6. Recipe Items (CRUD DETAIL) ---
 	protected.POST("/recipes", recipeHandler.Create)
@@ -76,6 +75,9 @@ func Init(
 	protected.PUT("/recipes/:id", recipeHandler.UpdateItem)
 	protected.PUT("/recipes", recipeHandler.UpdateItem)
 	protected.DELETE("/recipes/:id", recipeHandler.Delete)
+
+	// --- 7. [BARU] Payment Types ---
+	protected.GET("/payment-types", paymentTypeHandler.GetAll)
 
 	// ==========================================
 	// C. SELLER ROUTES (Butuh API KEY)

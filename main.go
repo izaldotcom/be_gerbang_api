@@ -94,6 +94,9 @@ func main() {
 	productHandler := handlers.NewProductHandler(client)
 	recipeHandler := handlers.NewRecipeHandler(client)
 
+	// payment type
+	paymentTypeHandler := handlers.NewPaymentTypeHandler(client, redisClient)
+
 	// ---------------------------------------------------------
 	// 6. REGISTER ROUTES
 	// ---------------------------------------------------------
@@ -106,7 +109,8 @@ func main() {
 		supplierProductHandler,
 		productHandler,
 		recipeHandler,
-		telegramHandler, // Hanya TelegramHandler yang ditambahkan
+		telegramHandler,
+		paymentTypeHandler,
 	)
 
 	// 7. Start Server

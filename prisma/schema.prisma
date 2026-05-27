@@ -205,21 +205,23 @@ model ProductRecipe {
 }
 
 model InternalOrder {
-  id          String   @id @default(uuid())
-  product_id  String
-  buyer_uid   String
-  quantity    Int
+  id              String   @id @default(uuid())
+  product_id      String
+  buyer_uid       String
+  quantity        Int
   
-  // [BARU] Tambahkan ini
-  user_id     String?  // Pakai ? dulu agar data lama tidak error
-  user        User?    @relation(fields: [user_id], references: [id])
+  user_id         String?  
+  user            User?    @relation(fields: [user_id], references: [id])
 
-  status      String   @default("pending")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  payment_type_id String?
+  paymentType     PaymentType? @relation(fields: [payment_type_id], references: [id])
 
-  product     Product  @relation(fields: [product_id], references: [id])
-  supplierOrders SupplierOrder[]
+  status          String   @default("pending")
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  product         Product  @relation(fields: [product_id], references: [id])
+  supplierOrders  SupplierOrder[]
 
   @@map("internal_order")
 }
@@ -255,4 +257,18 @@ model SupplierOrderItem {
   supplierProduct     SupplierProduct @relation(fields: [supplier_product_id], references: [id])
 
   @@map("supplier_order_item")
+}
+
+model PaymentType {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String   
+  
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Relasi balik ke InternalOrder
+  orders      InternalOrder[]
+
+  @@map("payment_type")
 }

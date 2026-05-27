@@ -39,11 +39,15 @@ func main() {
 	client.InternalOrder.FindMany().Delete().Exec(ctx)
 	client.ProductRecipe.FindMany().Delete().Exec(ctx)
 	
-    // Product & SupplierProduct harus dihapus sebelum Supplier
-    client.Product.FindMany().Delete().Exec(ctx) 
+	// Product & SupplierProduct harus dihapus sebelum Supplier
+	client.Product.FindMany().Delete().Exec(ctx) 
 	client.SupplierProduct.FindMany().Delete().Exec(ctx)
-    
-    // Baru hapus Parent
+	
+	// === [BARU] Hapus PaymentType setelah InternalOrder dihapus ===
+	client.PaymentType.FindMany().Delete().Exec(ctx)
+	// ==============================================================
+
+	// Baru hapus Parent
 	client.Supplier.FindMany().Delete().Exec(ctx)
 	client.APIKey.FindMany().Delete().Exec(ctx)
 	client.RefreshToken.FindMany().Delete().Exec(ctx)
@@ -192,8 +196,6 @@ func main() {
 	}
 
 	for _, p := range products {
-		// 1. Buat Produk Internal
-		// PERBAIKAN: Menambahkan .Link ke SupplierID (Wajib karena Schema berubah)
 		newProd, err := client.Product.CreateOne(
 			db.Product.Name.Set(p.Name),
 			db.Product.Denom.Set(p.Denom),
@@ -210,7 +212,7 @@ func main() {
 
 		log.Printf("✅ Produk Internal Created: %s", p.Name)
 
-		// 2. Buat Resep (Looping recipe items)
+		// Buat Resep
 		for _, r := range p.Recipes {
 			_, err := client.ProductRecipe.CreateOne(
 				db.ProductRecipe.Quantity.Set(r.Qty),
@@ -223,6 +225,32 @@ func main() {
 			} else {
 				log.Printf("   -> Resep Added: %d x [BaseUUID: ...%s]", r.Qty, r.BaseUUID[len(r.BaseUUID)-5:])
 			}
+		}
+	}
+
+	// ======================================================
+	// 7. [BARU] SEED PAYMENT TYPES
+	// ======================================================
+	paymentTypes := []struct {
+		Code string
+		Name string
+	}{
+		{"40", "QRIS"},
+		{"14", "DANA"},
+		{"22", "ShopeePay"},
+		{"13", "OVO"},
+	}
+
+	for _, pt := range paymentTypes {
+		_, err := client.PaymentType.CreateOne(
+			db.PaymentType.Code.Set(pt.Code),
+			db.PaymentType.Name.Set(pt.Name),
+		).Exec(ctx)
+
+		if err != nil {
+			log.Printf("❌ Gagal create payment type %s: %v", pt.Name, err)
+		} else {
+			log.Printf("✅ Payment Type Created: %s (Code: %s)", pt.Name, pt.Code)
 		}
 	}
 
