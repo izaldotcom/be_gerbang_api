@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -54,12 +55,12 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	}
 
 	user := keyData.User()
-	
+
 	// Handle Nullable Fields
 	phoneVal, _ := user.Phone()
 	webhookVal, _ := user.WebhookURL()
 	statusVal, _ := user.Status()
-	
+
 	// Handle Nullable Telegram Chat ID
 	telegramChatID, _ := user.TelegramChatID()
 
@@ -136,7 +137,7 @@ func (h *SellerHandler) UpdateProfile(c echo.Context) error {
 	if req.WebhookURL != "" {
 		ops = append(ops, db.User.WebhookURL.Set(req.WebhookURL))
 	}
-	
+
 	// Hash password jika ada perubahan
 	if req.Password != "" {
 		hashed, _ := utils.HashPassword(req.Password)
@@ -174,16 +175,22 @@ func (h *SellerHandler) UpdateProfile(c echo.Context) error {
 }
 
 // ==========================================
-// 3. GET SELLER PRODUCTS
+// 3. GET SELLER PRODUCTS (LANGSUNG DARI DATABASE)
 // ==========================================
 func (h *SellerHandler) SellerProducts(c echo.Context) error {
+	ctx := c.Request().Context()
+
+	log.Println("🌐 Mengambil Pricelist langsung dari Database Prisma")
+	
+	// Ambil semua produk beserta data supplier-nya langsung dari database
 	products, err := h.DB.Product.FindMany().With(
 		db.Product.Supplier.Fetch(),
-	).Exec(c.Request().Context())
+	).Exec(ctx)
 
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
+
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "List produk internal",
 		"data":    products,
@@ -191,7 +198,7 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 }
 
 // ==========================================
-// 4. CREATE ORDER (Asynchronous / Pending)
+// 4. CREATE ORDER (DENGAN VALIDASI NICKNAME DINAMIS)
 // ==========================================
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	type Req struct {
@@ -199,8 +206,8 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		Destination   string `json:"destination"`
 		RefID         string `json:"ref_id"`
 		SupplierID    string `json:"supplier_id"`
-		WebhookURL    string `json:"webhook_url"` // Opsional
-		PaymentTypeID string `json:"payment_type_id"` // [BARU] Tambahan field metode pembayaran
+		WebhookURL    string `json:"webhook_url"`
+		PaymentTypeID string `json:"payment_type_id"`
 	}
 
 	req := new(Req)
@@ -208,14 +215,17 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 	}
 
-	// [PERBAIKAN] Validasi bertambah mengecek PaymentTypeID
-	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" || req.PaymentTypeID == "" {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, supplier_id, dan payment_type_id required"})
+	// [PERBAIKAN] PaymentTypeID tidak lagi diwajibkan secara ketat di sini,
+	// karena beberapa supplier (seperti Digiflazz) tidak membutuhkannya.
+	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, dan supplier_id wajib diisi"})
 	}
 
 	ctx := c.Request().Context()
 
-	// A. VALIDASI PRODUCT
+	// ==========================================
+	// A. AMBIL DATA PRODUCT TERLEBIH DAHULU
+	// ==========================================
 	product, err := h.DB.Product.FindUnique(
 		db.Product.ID.Equals(req.ProductID),
 	).Exec(ctx)
@@ -231,11 +241,51 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 	realProductUUID := product.ID
 
-	// B. AMBIL USER ID (Dari Context Middleware)
-	// Pastikan SellerSecurityMiddleware sudah men-set "user_id"
+	// ==========================================
+	// B. PENENTUAN KODE GAME DINAMIS
+	// ==========================================
+	// Idealnya ini menggunakan kolom kategori di database (misal: product.Category.Code).
+	// Sebagai solusi cerdas tanpa merombak DB, kita deteksi dari kata kunci di nama produk:
+	productName := strings.ToLower(product.Name)
+	kodeGame := ""
+
+	if strings.Contains(productName, "pln") || strings.Contains(productName, "token") {
+		kodeGame = "pln"
+	} else if strings.Contains(productName, "mobile legends") || strings.Contains(productName, "mlbb") || strings.Contains(productName, "koin emas") {
+		kodeGame = "ml" // Kode untuk Mobile Legends / Mitra Higgs
+	} else if strings.Contains(productName, "free fire") || strings.Contains(productName, "ff") {
+		kodeGame = "ff"
+	}
+	// Anda bisa menambahkan deteksi game/produk lain di sini jika diperlukan
+
+	// ==========================================
+	// C. VALIDASI NICKNAME (KONDISIONAL)
+	// ==========================================
+	validationService := services.NewValidationService(h.Redis)
+	var nickname string
+	var errVal error
+
+	// Hanya lakukan validasi API jika kodeGame dikenali
+	if kodeGame != "" {
+		nickname, errVal = validationService.CekNickname(kodeGame, req.Destination)
+		if errVal != nil {
+			return c.JSON(http.StatusBadRequest, echo.Map{
+				"error": fmt.Sprintf("ID/Nomor Tujuan Tidak Valid: %v", errVal),
+			})
+		}
+		log.Printf("👤 Player Valid: %s untuk ID %s (Game: %s)", nickname, req.Destination, kodeGame)
+	} else {
+		// Jika produk tidak dikenali sebagai game (misal: Pulsa Telkomsel biasa)
+		// maka lewati pengecekan nickname pihak ketiga.
+		log.Printf("⏩ Melewati validasi Cek Nickname untuk produk: %s", product.Name)
+		nickname = req.Destination // Default kembali ke nomor yang diketik user
+	}
+
+	// ==========================================
+	// D. AMBIL USER ID (Dari Context Middleware)
+	// ==========================================
 	userID, ok := c.Get("user_id").(string)
 	if !ok || userID == "" {
-		// Fallback manual jika context kosong (Safety net)
 		apiKey := c.Request().Header.Get("X-API-KEY")
 		if apiKey != "" {
 			keyData, _ := h.DB.APIKey.FindUnique(db.APIKey.APIKey.Equals(apiKey)).Exec(ctx)
@@ -249,37 +299,52 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized: User ID not found"})
 	}
 
-	// C. INSERT INTERNAL ORDER (Status: Pending)
-	// [PERBAIKAN] Tambahkan kolom payment_type_id ke dalam Query ExecuteRaw
+	// ==========================================
+	// E. INSERT INTERNAL ORDER (Status: Pending)
+	// ==========================================
 	internalOrderID := uuid.New().String()
-	_, err = h.DB.Prisma.ExecuteRaw(
-		`INSERT INTO internal_order 
-         (id, product_id, user_id, payment_type_id, buyer_uid, quantity, status, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
-		internalOrderID, realProductUUID, userID, req.PaymentTypeID, req.Destination, 1,
-	).Exec(ctx)
+	// Pisahkan query berdasarkan ketersediaan payment_type_id
+	if req.PaymentTypeID == "" {
+		// Jika KOSONG (Digiflazz), eksekusi tanpa kolom payment_type_id
+		_, err = h.DB.Prisma.ExecuteRaw(
+			`INSERT INTO internal_order 
+			 (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
+			 VALUES (?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
+			internalOrderID, realProductUUID, userID, req.Destination, 1,
+		).Exec(ctx)
+	} else {
+		// Jika ADA (Mitra Higgs), eksekusi lengkap dengan payment_type_id
+		_, err = h.DB.Prisma.ExecuteRaw(
+			`INSERT INTO internal_order 
+			 (id, product_id, user_id, payment_type_id, buyer_uid, quantity, status, created_at, updated_at) 
+			 VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
+			internalOrderID, realProductUUID, userID, req.PaymentTypeID, req.Destination, 1,
+		).Exec(ctx)
+	}
 
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Database error: " + err.Error()})
 	}
 
-	// D. MIXING PROCESS (Memecah menjadi Supplier Order)
-	// Fungsi ini akan membuat row di tabel supplier_order dengan status 'pending'
+	// ==========================================
+	// F. MIXING PROCESS (Memecah menjadi Supplier Order)
+	// ==========================================
 	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
 
 	if mixErr != nil {
-		// Update failed jika mixing gagal
 		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
 	}
 
-	// E. RESPONSE CEPAT (Accepted)
-	// Worker di background akan memproses order yang statusnya 'pending'
+	// ==========================================
+	// G. RESPONSE CEPAT (Accepted)
+	// ==========================================
 	log.Printf("✅ Order Accepted: %s -> Masuk Antrian Worker", internalOrderID)
 
 	return c.JSON(http.StatusAccepted, echo.Map{
 		"status":            "pending",
 		"message":           "Order accepted and queued for processing",
+		"player_name":       nickname,
 		"order_id":          internalOrderID,
 		"supplier_order_id": supplierOrder.ID,
 		"estimated_time":    "1-2 minutes",
@@ -318,17 +383,16 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 		}
 
 		sn := "-"
-		
+
 		// Ambil SN dari SupplierOrder pertama yang punya TrxID
 		sos := o.SupplierOrders()
 		for _, so := range sos {
 			if val, ok := so.ProviderTrxID(); ok && val != "" {
 				sn = val
-				break 
+				break
 			}
 		}
 
-		// [BARU] Ambil Data Payment Type ID jika diperlukan riwayatnya
 		paymentTypeID, _ := o.PaymentTypeID()
 
 		item := map[string]interface{}{
@@ -336,7 +400,7 @@ func (h *SellerHandler) HistoryOrder(c echo.Context) error {
 			"ref_id":          o.ID,
 			"product_name":    productName,
 			"destination":     o.BuyerUID,
-			"payment_type_id": paymentTypeID, // [BARU] Ditambahkan ke payload list riwayat
+			"payment_type_id": paymentTypeID,
 			"quantity":        o.Quantity,
 			"status":          o.Status,
 			"sn":              sn,

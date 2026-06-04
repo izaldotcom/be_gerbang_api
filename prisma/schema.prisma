@@ -165,6 +165,7 @@ model SupplierProduct {
   recipe              ProductRecipe[]
   items               SupplierOrderItem[]
 
+  @@unique([supplierProductID, supplier_id])
   @@map("supplier_product")
 }
 

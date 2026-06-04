@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"gerbangapi/app/handlers"
+	digihandler "gerbangapi/app/handlers/digiflazz"
 	"gerbangapi/app/routes"
 	"gerbangapi/app/services"
 	"gerbangapi/app/worker"
@@ -65,6 +66,7 @@ func main() {
 	// ---------------------------------------------------------
 	// Worker berjalan otomatis di goroutine terpisah untuk memantau order
 	worker.StartWorker(client, redisClient)
+	worker.StartDigiflazzWorker(client) // [BARU] Pastikan worker Digiflazz juga dijalankan
 
 	// 4. Create Echo Instance & Global Middleware
 	e := echo.New()
@@ -84,9 +86,9 @@ func main() {
 	// B. Handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	sellerHandler := handlers.NewSellerHandler(client, orderService, redisClient)
-	
+
 	// [BARU] Inisialisasi Telegram Handler untuk Deep Linking
-	telegramHandler := handlers.NewTelegramHandler(client) 
+	telegramHandler := handlers.NewTelegramHandler(client)
 
 	// CRUD Handlers
 	supplierHandler := handlers.NewSupplierHandler(client, redisClient)
@@ -96,6 +98,9 @@ func main() {
 
 	// payment type
 	paymentTypeHandler := handlers.NewPaymentTypeHandler(client, redisClient)
+
+	// [BARU] Inisialisasi Handler Digiflazz
+	dfHandler := digihandler.NewHandler(client, redisClient)
 
 	// ---------------------------------------------------------
 	// 6. REGISTER ROUTES
@@ -111,6 +116,7 @@ func main() {
 		recipeHandler,
 		telegramHandler,
 		paymentTypeHandler,
+		dfHandler,
 	)
 
 	// 7. Start Server

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"gerbangapi/app/handlers"
+	digihandler "gerbangapi/app/handlers/digiflazz"
 	mid "gerbangapi/app/middleware"
 	"gerbangapi/prisma/db"
 
@@ -20,6 +21,7 @@ func Init(
 	recipeHandler *handlers.RecipeHandler,
 	telegramHandler *handlers.TelegramHandler,
 	paymentTypeHandler *handlers.PaymentTypeHandler,
+	dfHandler *digihandler.Handler,
 ) {
 	// Grouping v1
 	v1 := e.Group("/api/v1")
@@ -30,13 +32,16 @@ func Init(
 	v1.POST("/register", authHandler.RegisterUser)
 	v1.POST("/login", authHandler.LoginUser)
 	v1.POST("/refresh-token", authHandler.RefreshToken)
-	
+
 	// Note: Verify & GetUsers sebaiknya diproteksi middleware admin kedepannya
-	v1.POST("/verify", authHandler.VerifyUser) 
-	v1.GET("/users", authHandler.GetUsers) 
+	v1.POST("/verify", authHandler.VerifyUser)
+	v1.GET("/users", authHandler.GetUsers)
 
 	// Route untuk Telegram Webhook
 	v1.POST("/webhook/telegram", telegramHandler.HandleWebhook)
+
+	// === [BARU] Route untuk Menerima Webhook Digiflazz ===
+	v1.POST("/webhook/digiflazz", dfHandler.HandleWebhook)
 
 	// ==========================================
 	// B. PROTECTED ROUTES (Butuh Bearer Token)
@@ -75,14 +80,17 @@ func Init(
 	protected.PUT("/recipes/:id", recipeHandler.UpdateItem)
 	protected.PUT("/recipes", recipeHandler.UpdateItem)
 	protected.DELETE("/recipes/:id", recipeHandler.Delete)
-	
+
 	// === [PERBAIKAN] Tambahkan 2 baris ini untuk handle hapus massal via query param ===
-	protected.DELETE("/recipes", recipeHandler.Delete)   // Menangani /recipes?product_id=...
-	protected.DELETE("/recipes/", recipeHandler.Delete)  // Menangani /recipes/?product_id=... (Sesuai log FE Anda)
+	protected.DELETE("/recipes", recipeHandler.Delete)  // Menangani /recipes?product_id=...
+	protected.DELETE("/recipes/", recipeHandler.Delete) // Menangani /recipes/?product_id=... (Sesuai log FE Anda)
 	// ===================================================================================
 
-	// --- 7. [BARU] Payment Types ---
+	// --- 7. Payment Types ---
 	protected.GET("/payment-types", paymentTypeHandler.GetAll)
+
+	// --- 8. [BARU] Digiflazz Admin ---
+	protected.POST("/admin/sync-digiflazz", dfHandler.SyncProducts)
 
 	// ==========================================
 	// C. SELLER ROUTES (Butuh API KEY)
@@ -94,7 +102,7 @@ func Init(
 	sellerGroup.GET("/products", sellerHandler.SellerProducts)
 	sellerGroup.POST("/order", sellerHandler.SellerOrder)
 	sellerGroup.GET("/order/history", sellerHandler.HistoryOrder)
-	
+
 	sellerGroup.GET("/status", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{"message": "Seller status endpoint"})
 	})
