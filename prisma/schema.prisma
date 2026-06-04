@@ -8,27 +8,30 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
+  id               String    @id @default(uuid())
   
-  role_id       String?   
-  role          Role?     @relation(fields: [role_id], references: [id])
-  name          String
-  email         String    @unique
-  password      String
-  phone         String?
-  webhook_url   String?   @map("webhook_url")
-  status        String?
+  role_id          String?   
+  role             Role?     @relation(fields: [role_id], references: [id])
+  name             String
+  email            String    @unique
+  password         String
+  phone            String?
+  webhook_url      String?   @map("webhook_url")
+  status           String?
   telegram_chat_id String?
-  last_login    DateTime?
-  
-  created_at    DateTime  @default(now())
-  created_by    String?
-  updated_at    DateTime  @updatedAt
-  updated_by    String?
+  last_login       DateTime?
+  balance          Float     @default(0)
+  created_at       DateTime  @default(now())
+  created_by       String?
+  updated_at       DateTime  @updatedAt
+  updated_by       String?
 
-  refreshTokens RefreshToken[]
-  apiKeys       APIKey[]
-  internalOrders InternalOrder[]
+  refreshTokens    RefreshToken[]
+  apiKeys          APIKey[]
+  internalOrders   InternalOrder[]
+
+  topups           TopUp[]
+  mutations        WalletMutation[]
 
   @@map("user")
 }
@@ -273,4 +276,34 @@ model PaymentType {
   orders      InternalOrder[]
 
   @@map("payment_type")
+}
+
+model TopUp {
+  id              String   @id @default(uuid())
+  user_id         String
+  amount          Float
+  payment_method  String?  // Contoh: "TRANSFER_BCA", "QRIS", "MANUAL"
+  status          String   @default("pending") // pending, success, failed
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  user            User     @relation(fields: [user_id], references: [id])
+
+  @@map("topup")
+}
+
+model WalletMutation {
+  id              String   @id @default(uuid())
+  user_id         String
+  type            String   // "CREDIT" (Uang Masuk) atau "DEBIT" (Uang Keluar)
+  amount          Float
+  balance_before  Float    
+  balance_after   Float    
+  description     String   
+  reference_id    String?  // Menyimpan ID dari tabel TopUp atau InternalOrder
+  created_at      DateTime @default(now())
+
+  user            User     @relation(fields: [user_id], references: [id])
+
+  @@map("wallet_mutation")
 }

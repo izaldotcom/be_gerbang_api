@@ -95,15 +95,18 @@ model User {
   status           String?
   telegram_chat_id String?
   last_login       DateTime?
-
-  created_at DateTime @default(now())
-  created_by String?
-  updated_at DateTime @updatedAt
-  updated_by String?
+  balance          Float     @default(0)
+  created_at       DateTime  @default(now())
+  created_by       String?
+  updated_at       DateTime  @updatedAt
+  updated_by       String?
 
   refreshTokens  RefreshToken[]
   apiKeys        APIKey[]
   internalOrders InternalOrder[]
+
+  topups    TopUp[]
+  mutations WalletMutation[]
 
   @@map("user")
 }
@@ -139,16 +142,17 @@ model APIKey {
 }
 
 model Supplier {
-  id         String   @id @default(uuid())
-  name       String
-  username   String?
-  password   String?
-  code       String   @default("DEFAULT")
-  type       String
-  base_url   String?
-  status     Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id              String   @id @default(uuid())
+  name            String
+  username        String?
+  password        String?
+  code            String   @default("DEFAULT")
+  type            String
+  base_url        String?
+  webhook_inbound String?
+  status          Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
 
   // Relasi yang sudah ada
   products         InternalProduct[] @relation("SupplierProducts")
@@ -239,6 +243,7 @@ model SupplierProduct {
   recipe ProductRecipe[]
   items  SupplierOrderItem[]
 
+  @@unique([supplierProductID, supplier_id])
   @@map("supplier_product")
 }
 
@@ -344,6 +349,36 @@ model PaymentType {
 
   @@map("payment_type")
 }
+
+model TopUp {
+  id             String   @id @default(uuid())
+  user_id        String
+  amount         Float
+  payment_method String? // Contoh: "TRANSFER_BCA", "QRIS", "MANUAL"
+  status         String   @default("pending") // pending, success, failed
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("topup")
+}
+
+model WalletMutation {
+  id             String   @id @default(uuid())
+  user_id        String
+  type           String // "CREDIT" (Uang Masuk) atau "DEBIT" (Uang Keluar)
+  amount         Float
+  balance_before Float
+  balance_after  Float
+  description    String
+  reference_id   String? // Menyimpan ID dari tabel TopUp atau InternalOrder
+  created_at     DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("wallet_mutation")
+}
 `
 const schemaDatasourceURL = ""
 const schemaEnvVarName = "DATABASE_URL"
@@ -430,6 +465,8 @@ func newClient() *PrismaClient {
 	c.SupplierOrder = supplierOrderActions{client: c}
 	c.SupplierOrderItem = supplierOrderItemActions{client: c}
 	c.PaymentType = paymentTypeActions{client: c}
+	c.TopUp = topUpActions{client: c}
+	c.WalletMutation = walletMutationActions{client: c}
 
 	c.Prisma = &PrismaActions{
 		Raw: &raw.Raw{Engine: c},
@@ -484,6 +521,10 @@ type PrismaClient struct {
 	SupplierOrderItem supplierOrderItemActions
 	// PaymentType provides access to CRUD methods.
 	PaymentType paymentTypeActions
+	// TopUp provides access to CRUD methods.
+	TopUp topUpActions
+	// WalletMutation provides access to CRUD methods.
+	WalletMutation walletMutationActions
 }
 
 // --- template enums.gotpl ---
@@ -510,6 +551,7 @@ const (
 	UserScalarFieldEnumStatus         UserScalarFieldEnum = "status"
 	UserScalarFieldEnumTelegramChatID UserScalarFieldEnum = "telegram_chat_id"
 	UserScalarFieldEnumLastLogin      UserScalarFieldEnum = "last_login"
+	UserScalarFieldEnumBalance        UserScalarFieldEnum = "balance"
 	UserScalarFieldEnumCreatedAt      UserScalarFieldEnum = "created_at"
 	UserScalarFieldEnumCreatedBy      UserScalarFieldEnum = "created_by"
 	UserScalarFieldEnumUpdatedAt      UserScalarFieldEnum = "updated_at"
@@ -543,16 +585,17 @@ const (
 type SupplierScalarFieldEnum string
 
 const (
-	SupplierScalarFieldEnumID        SupplierScalarFieldEnum = "id"
-	SupplierScalarFieldEnumName      SupplierScalarFieldEnum = "name"
-	SupplierScalarFieldEnumUsername  SupplierScalarFieldEnum = "username"
-	SupplierScalarFieldEnumPassword  SupplierScalarFieldEnum = "password"
-	SupplierScalarFieldEnumCode      SupplierScalarFieldEnum = "code"
-	SupplierScalarFieldEnumType      SupplierScalarFieldEnum = "type"
-	SupplierScalarFieldEnumBaseURL   SupplierScalarFieldEnum = "base_url"
-	SupplierScalarFieldEnumStatus    SupplierScalarFieldEnum = "status"
-	SupplierScalarFieldEnumCreatedAt SupplierScalarFieldEnum = "created_at"
-	SupplierScalarFieldEnumUpdatedAt SupplierScalarFieldEnum = "updated_at"
+	SupplierScalarFieldEnumID             SupplierScalarFieldEnum = "id"
+	SupplierScalarFieldEnumName           SupplierScalarFieldEnum = "name"
+	SupplierScalarFieldEnumUsername       SupplierScalarFieldEnum = "username"
+	SupplierScalarFieldEnumPassword       SupplierScalarFieldEnum = "password"
+	SupplierScalarFieldEnumCode           SupplierScalarFieldEnum = "code"
+	SupplierScalarFieldEnumType           SupplierScalarFieldEnum = "type"
+	SupplierScalarFieldEnumBaseURL        SupplierScalarFieldEnum = "base_url"
+	SupplierScalarFieldEnumWebhookInbound SupplierScalarFieldEnum = "webhook_inbound"
+	SupplierScalarFieldEnumStatus         SupplierScalarFieldEnum = "status"
+	SupplierScalarFieldEnumCreatedAt      SupplierScalarFieldEnum = "created_at"
+	SupplierScalarFieldEnumUpdatedAt      SupplierScalarFieldEnum = "updated_at"
 )
 
 type InternalProductScalarFieldEnum string
@@ -689,6 +732,32 @@ const (
 	PaymentTypeScalarFieldEnumUpdatedAt PaymentTypeScalarFieldEnum = "updated_at"
 )
 
+type TopUpScalarFieldEnum string
+
+const (
+	TopUpScalarFieldEnumID            TopUpScalarFieldEnum = "id"
+	TopUpScalarFieldEnumUserID        TopUpScalarFieldEnum = "user_id"
+	TopUpScalarFieldEnumAmount        TopUpScalarFieldEnum = "amount"
+	TopUpScalarFieldEnumPaymentMethod TopUpScalarFieldEnum = "payment_method"
+	TopUpScalarFieldEnumStatus        TopUpScalarFieldEnum = "status"
+	TopUpScalarFieldEnumCreatedAt     TopUpScalarFieldEnum = "created_at"
+	TopUpScalarFieldEnumUpdatedAt     TopUpScalarFieldEnum = "updated_at"
+)
+
+type WalletMutationScalarFieldEnum string
+
+const (
+	WalletMutationScalarFieldEnumID            WalletMutationScalarFieldEnum = "id"
+	WalletMutationScalarFieldEnumUserID        WalletMutationScalarFieldEnum = "user_id"
+	WalletMutationScalarFieldEnumType          WalletMutationScalarFieldEnum = "type"
+	WalletMutationScalarFieldEnumAmount        WalletMutationScalarFieldEnum = "amount"
+	WalletMutationScalarFieldEnumBalanceBefore WalletMutationScalarFieldEnum = "balance_before"
+	WalletMutationScalarFieldEnumBalanceAfter  WalletMutationScalarFieldEnum = "balance_after"
+	WalletMutationScalarFieldEnumDescription   WalletMutationScalarFieldEnum = "description"
+	WalletMutationScalarFieldEnumReferenceID   WalletMutationScalarFieldEnum = "reference_id"
+	WalletMutationScalarFieldEnumCreatedAt     WalletMutationScalarFieldEnum = "created_at"
+)
+
 type SortOrder string
 
 const (
@@ -740,13 +809,14 @@ const (
 type SupplierOrderByRelevanceFieldEnum string
 
 const (
-	SupplierOrderByRelevanceFieldEnumID       SupplierOrderByRelevanceFieldEnum = "id"
-	SupplierOrderByRelevanceFieldEnumName     SupplierOrderByRelevanceFieldEnum = "name"
-	SupplierOrderByRelevanceFieldEnumUsername SupplierOrderByRelevanceFieldEnum = "username"
-	SupplierOrderByRelevanceFieldEnumPassword SupplierOrderByRelevanceFieldEnum = "password"
-	SupplierOrderByRelevanceFieldEnumCode     SupplierOrderByRelevanceFieldEnum = "code"
-	SupplierOrderByRelevanceFieldEnumType     SupplierOrderByRelevanceFieldEnum = "type"
-	SupplierOrderByRelevanceFieldEnumBaseURL  SupplierOrderByRelevanceFieldEnum = "base_url"
+	SupplierOrderByRelevanceFieldEnumID             SupplierOrderByRelevanceFieldEnum = "id"
+	SupplierOrderByRelevanceFieldEnumName           SupplierOrderByRelevanceFieldEnum = "name"
+	SupplierOrderByRelevanceFieldEnumUsername       SupplierOrderByRelevanceFieldEnum = "username"
+	SupplierOrderByRelevanceFieldEnumPassword       SupplierOrderByRelevanceFieldEnum = "password"
+	SupplierOrderByRelevanceFieldEnumCode           SupplierOrderByRelevanceFieldEnum = "code"
+	SupplierOrderByRelevanceFieldEnumType           SupplierOrderByRelevanceFieldEnum = "type"
+	SupplierOrderByRelevanceFieldEnumBaseURL        SupplierOrderByRelevanceFieldEnum = "base_url"
+	SupplierOrderByRelevanceFieldEnumWebhookInbound SupplierOrderByRelevanceFieldEnum = "webhook_inbound"
 )
 
 type InternalProductOrderByRelevanceFieldEnum string
@@ -849,6 +919,25 @@ const (
 	PaymentTypeOrderByRelevanceFieldEnumName PaymentTypeOrderByRelevanceFieldEnum = "name"
 )
 
+type TopUpOrderByRelevanceFieldEnum string
+
+const (
+	TopUpOrderByRelevanceFieldEnumID            TopUpOrderByRelevanceFieldEnum = "id"
+	TopUpOrderByRelevanceFieldEnumUserID        TopUpOrderByRelevanceFieldEnum = "user_id"
+	TopUpOrderByRelevanceFieldEnumPaymentMethod TopUpOrderByRelevanceFieldEnum = "payment_method"
+	TopUpOrderByRelevanceFieldEnumStatus        TopUpOrderByRelevanceFieldEnum = "status"
+)
+
+type WalletMutationOrderByRelevanceFieldEnum string
+
+const (
+	WalletMutationOrderByRelevanceFieldEnumID          WalletMutationOrderByRelevanceFieldEnum = "id"
+	WalletMutationOrderByRelevanceFieldEnumUserID      WalletMutationOrderByRelevanceFieldEnum = "user_id"
+	WalletMutationOrderByRelevanceFieldEnumType        WalletMutationOrderByRelevanceFieldEnum = "type"
+	WalletMutationOrderByRelevanceFieldEnumDescription WalletMutationOrderByRelevanceFieldEnum = "description"
+	WalletMutationOrderByRelevanceFieldEnumReferenceID WalletMutationOrderByRelevanceFieldEnum = "reference_id"
+)
+
 // --- template errors.gotpl ---
 var ErrNotFound = types.ErrNotFound
 var IsErrNotFound = types.IsErrNotFound
@@ -904,6 +993,8 @@ const userFieldTelegramChatID userPrismaFields = "telegram_chat_id"
 
 const userFieldLastLogin userPrismaFields = "last_login"
 
+const userFieldBalance userPrismaFields = "balance"
+
 const userFieldCreatedAt userPrismaFields = "created_at"
 
 const userFieldCreatedBy userPrismaFields = "created_by"
@@ -917,6 +1008,10 @@ const userFieldRefreshTokens userPrismaFields = "refreshTokens"
 const userFieldAPIKeys userPrismaFields = "apiKeys"
 
 const userFieldInternalOrders userPrismaFields = "internalOrders"
+
+const userFieldTopups userPrismaFields = "topups"
+
+const userFieldMutations userPrismaFields = "mutations"
 
 const userFieldRelevance userPrismaFields = "relevance"
 
@@ -975,6 +1070,8 @@ const supplierFieldCode supplierPrismaFields = "code"
 const supplierFieldType supplierPrismaFields = "type"
 
 const supplierFieldBaseURL supplierPrismaFields = "base_url"
+
+const supplierFieldWebhookInbound supplierPrismaFields = "webhook_inbound"
 
 const supplierFieldStatus supplierPrismaFields = "status"
 
@@ -1242,6 +1339,50 @@ const paymentTypeFieldOrders paymentTypePrismaFields = "orders"
 
 const paymentTypeFieldRelevance paymentTypePrismaFields = "relevance"
 
+type topUpPrismaFields = prismaFields
+
+const topUpFieldID topUpPrismaFields = "id"
+
+const topUpFieldUserID topUpPrismaFields = "user_id"
+
+const topUpFieldAmount topUpPrismaFields = "amount"
+
+const topUpFieldPaymentMethod topUpPrismaFields = "payment_method"
+
+const topUpFieldStatus topUpPrismaFields = "status"
+
+const topUpFieldCreatedAt topUpPrismaFields = "created_at"
+
+const topUpFieldUpdatedAt topUpPrismaFields = "updated_at"
+
+const topUpFieldUser topUpPrismaFields = "user"
+
+const topUpFieldRelevance topUpPrismaFields = "relevance"
+
+type walletMutationPrismaFields = prismaFields
+
+const walletMutationFieldID walletMutationPrismaFields = "id"
+
+const walletMutationFieldUserID walletMutationPrismaFields = "user_id"
+
+const walletMutationFieldType walletMutationPrismaFields = "type"
+
+const walletMutationFieldAmount walletMutationPrismaFields = "amount"
+
+const walletMutationFieldBalanceBefore walletMutationPrismaFields = "balance_before"
+
+const walletMutationFieldBalanceAfter walletMutationPrismaFields = "balance_after"
+
+const walletMutationFieldDescription walletMutationPrismaFields = "description"
+
+const walletMutationFieldReferenceID walletMutationPrismaFields = "reference_id"
+
+const walletMutationFieldCreatedAt walletMutationPrismaFields = "created_at"
+
+const walletMutationFieldUser walletMutationPrismaFields = "user"
+
+const walletMutationFieldRelevance walletMutationPrismaFields = "relevance"
+
 // --- template mock.gotpl ---
 func NewMock() (*PrismaClient, *Mock, func(t *testing.T)) {
 	expectations := new([]mock.Expectation)
@@ -1312,6 +1453,14 @@ func NewMock() (*PrismaClient, *Mock, func(t *testing.T)) {
 		mock: m,
 	}
 
+	m.TopUp = topUpMock{
+		mock: m,
+	}
+
+	m.WalletMutation = walletMutationMock{
+		mock: m,
+	}
+
 	return pc, m, m.Ensure
 }
 
@@ -1347,6 +1496,10 @@ type Mock struct {
 	SupplierOrderItem supplierOrderItemMock
 
 	PaymentType paymentTypeMock
+
+	TopUp topUpMock
+
+	WalletMutation walletMutationMock
 }
 
 type userMock struct {
@@ -1979,6 +2132,90 @@ func (m *paymentTypeMockExec) Errors(err error) {
 	})
 }
 
+type topUpMock struct {
+	mock *Mock
+}
+
+type TopUpMockExpectParam interface {
+	ExtractQuery() builder.Query
+	topUpModel()
+}
+
+func (m *topUpMock) Expect(query TopUpMockExpectParam) *topUpMockExec {
+	return &topUpMockExec{
+		mock:  m.mock,
+		query: query.ExtractQuery(),
+	}
+}
+
+type topUpMockExec struct {
+	mock  *Mock
+	query builder.Query
+}
+
+func (m *topUpMockExec) Returns(v TopUpModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *topUpMockExec) ReturnsMany(v []TopUpModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *topUpMockExec) Errors(err error) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query:   m.query,
+		WantErr: err,
+	})
+}
+
+type walletMutationMock struct {
+	mock *Mock
+}
+
+type WalletMutationMockExpectParam interface {
+	ExtractQuery() builder.Query
+	walletMutationModel()
+}
+
+func (m *walletMutationMock) Expect(query WalletMutationMockExpectParam) *walletMutationMockExec {
+	return &walletMutationMockExec{
+		mock:  m.mock,
+		query: query.ExtractQuery(),
+	}
+}
+
+type walletMutationMockExec struct {
+	mock  *Mock
+	query builder.Query
+}
+
+func (m *walletMutationMockExec) Returns(v WalletMutationModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *walletMutationMockExec) ReturnsMany(v []WalletMutationModel) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query: m.query,
+		Want:  &v,
+	})
+}
+
+func (m *walletMutationMockExec) Errors(err error) {
+	*m.mock.Expectations = append(*m.mock.Expectations, mock.Expectation{
+		Query:   m.query,
+		WantErr: err,
+	})
+}
+
 // --- template models.gotpl ---
 
 // UserModel represents the User model and is a wrapper for accessing fields and methods
@@ -1999,6 +2236,7 @@ type InnerUser struct {
 	Status         *string   `json:"status,omitempty"`
 	TelegramChatID *string   `json:"telegram_chat_id,omitempty"`
 	LastLogin      *DateTime `json:"last_login,omitempty"`
+	Balance        float64   `json:"balance"`
 	CreatedAt      DateTime  `json:"created_at"`
 	CreatedBy      *string   `json:"created_by,omitempty"`
 	UpdatedAt      DateTime  `json:"updated_at"`
@@ -2017,6 +2255,7 @@ type RawUserModel struct {
 	Status         *RawString   `json:"status,omitempty"`
 	TelegramChatID *RawString   `json:"telegram_chat_id,omitempty"`
 	LastLogin      *RawDateTime `json:"last_login,omitempty"`
+	Balance        RawFloat     `json:"balance"`
 	CreatedAt      RawDateTime  `json:"created_at"`
 	CreatedBy      *RawString   `json:"created_by,omitempty"`
 	UpdatedAt      RawDateTime  `json:"updated_at"`
@@ -2025,10 +2264,12 @@ type RawUserModel struct {
 
 // RelationsUser holds the relation data separately
 type RelationsUser struct {
-	Role           *RoleModel           `json:"role,omitempty"`
-	RefreshTokens  []RefreshTokenModel  `json:"refreshTokens,omitempty"`
-	APIKeys        []APIKeyModel        `json:"apiKeys,omitempty"`
-	InternalOrders []InternalOrderModel `json:"internalOrders,omitempty"`
+	Role           *RoleModel            `json:"role,omitempty"`
+	RefreshTokens  []RefreshTokenModel   `json:"refreshTokens,omitempty"`
+	APIKeys        []APIKeyModel         `json:"apiKeys,omitempty"`
+	InternalOrders []InternalOrderModel  `json:"internalOrders,omitempty"`
+	Topups         []TopUpModel          `json:"topups,omitempty"`
+	Mutations      []WalletMutationModel `json:"mutations,omitempty"`
 }
 
 func (r UserModel) RoleID() (value String, ok bool) {
@@ -2113,6 +2354,20 @@ func (r UserModel) InternalOrders() (value []InternalOrderModel) {
 		panic("attempted to access internalOrders but did not fetch it using the .With() syntax")
 	}
 	return r.RelationsUser.InternalOrders
+}
+
+func (r UserModel) Topups() (value []TopUpModel) {
+	if r.RelationsUser.Topups == nil {
+		panic("attempted to access topups but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsUser.Topups
+}
+
+func (r UserModel) Mutations() (value []WalletMutationModel) {
+	if r.RelationsUser.Mutations == nil {
+		panic("attempted to access mutations but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsUser.Mutations
 }
 
 // RefreshTokenModel represents the RefreshToken model and is a wrapper for accessing fields and methods
@@ -2210,30 +2465,32 @@ type SupplierModel struct {
 
 // InnerSupplier holds the actual data
 type InnerSupplier struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Username  *string  `json:"username,omitempty"`
-	Password  *string  `json:"password,omitempty"`
-	Code      string   `json:"code"`
-	Type      string   `json:"type"`
-	BaseURL   *string  `json:"base_url,omitempty"`
-	Status    bool     `json:"status"`
-	CreatedAt DateTime `json:"created_at"`
-	UpdatedAt DateTime `json:"updated_at"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Username       *string  `json:"username,omitempty"`
+	Password       *string  `json:"password,omitempty"`
+	Code           string   `json:"code"`
+	Type           string   `json:"type"`
+	BaseURL        *string  `json:"base_url,omitempty"`
+	WebhookInbound *string  `json:"webhook_inbound,omitempty"`
+	Status         bool     `json:"status"`
+	CreatedAt      DateTime `json:"created_at"`
+	UpdatedAt      DateTime `json:"updated_at"`
 }
 
 // RawSupplierModel is a struct for Supplier when used in raw queries
 type RawSupplierModel struct {
-	ID        RawString   `json:"id"`
-	Name      RawString   `json:"name"`
-	Username  *RawString  `json:"username,omitempty"`
-	Password  *RawString  `json:"password,omitempty"`
-	Code      RawString   `json:"code"`
-	Type      RawString   `json:"type"`
-	BaseURL   *RawString  `json:"base_url,omitempty"`
-	Status    RawBoolean  `json:"status"`
-	CreatedAt RawDateTime `json:"created_at"`
-	UpdatedAt RawDateTime `json:"updated_at"`
+	ID             RawString   `json:"id"`
+	Name           RawString   `json:"name"`
+	Username       *RawString  `json:"username,omitempty"`
+	Password       *RawString  `json:"password,omitempty"`
+	Code           RawString   `json:"code"`
+	Type           RawString   `json:"type"`
+	BaseURL        *RawString  `json:"base_url,omitempty"`
+	WebhookInbound *RawString  `json:"webhook_inbound,omitempty"`
+	Status         RawBoolean  `json:"status"`
+	CreatedAt      RawDateTime `json:"created_at"`
+	UpdatedAt      RawDateTime `json:"updated_at"`
 }
 
 // RelationsSupplier holds the relation data separately
@@ -2263,6 +2520,13 @@ func (r SupplierModel) BaseURL() (value String, ok bool) {
 		return value, false
 	}
 	return *r.InnerSupplier.BaseURL, true
+}
+
+func (r SupplierModel) WebhookInbound() (value String, ok bool) {
+	if r.InnerSupplier.WebhookInbound == nil {
+		return value, false
+	}
+	return *r.InnerSupplier.WebhookInbound, true
 }
 
 func (r SupplierModel) Products() (value []InternalProductModel) {
@@ -2932,6 +3196,104 @@ func (r PaymentTypeModel) Orders() (value []InternalOrderModel) {
 	return r.RelationsPaymentType.Orders
 }
 
+// TopUpModel represents the TopUp model and is a wrapper for accessing fields and methods
+type TopUpModel struct {
+	InnerTopUp
+	RelationsTopUp
+}
+
+// InnerTopUp holds the actual data
+type InnerTopUp struct {
+	ID            string   `json:"id"`
+	UserID        string   `json:"user_id"`
+	Amount        float64  `json:"amount"`
+	PaymentMethod *string  `json:"payment_method,omitempty"`
+	Status        string   `json:"status"`
+	CreatedAt     DateTime `json:"created_at"`
+	UpdatedAt     DateTime `json:"updated_at"`
+}
+
+// RawTopUpModel is a struct for TopUp when used in raw queries
+type RawTopUpModel struct {
+	ID            RawString   `json:"id"`
+	UserID        RawString   `json:"user_id"`
+	Amount        RawFloat    `json:"amount"`
+	PaymentMethod *RawString  `json:"payment_method,omitempty"`
+	Status        RawString   `json:"status"`
+	CreatedAt     RawDateTime `json:"created_at"`
+	UpdatedAt     RawDateTime `json:"updated_at"`
+}
+
+// RelationsTopUp holds the relation data separately
+type RelationsTopUp struct {
+	User *UserModel `json:"user,omitempty"`
+}
+
+func (r TopUpModel) PaymentMethod() (value String, ok bool) {
+	if r.InnerTopUp.PaymentMethod == nil {
+		return value, false
+	}
+	return *r.InnerTopUp.PaymentMethod, true
+}
+
+func (r TopUpModel) User() (value *UserModel) {
+	if r.RelationsTopUp.User == nil {
+		panic("attempted to access user but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsTopUp.User
+}
+
+// WalletMutationModel represents the WalletMutation model and is a wrapper for accessing fields and methods
+type WalletMutationModel struct {
+	InnerWalletMutation
+	RelationsWalletMutation
+}
+
+// InnerWalletMutation holds the actual data
+type InnerWalletMutation struct {
+	ID            string   `json:"id"`
+	UserID        string   `json:"user_id"`
+	Type          string   `json:"type"`
+	Amount        float64  `json:"amount"`
+	BalanceBefore float64  `json:"balance_before"`
+	BalanceAfter  float64  `json:"balance_after"`
+	Description   string   `json:"description"`
+	ReferenceID   *string  `json:"reference_id,omitempty"`
+	CreatedAt     DateTime `json:"created_at"`
+}
+
+// RawWalletMutationModel is a struct for WalletMutation when used in raw queries
+type RawWalletMutationModel struct {
+	ID            RawString   `json:"id"`
+	UserID        RawString   `json:"user_id"`
+	Type          RawString   `json:"type"`
+	Amount        RawFloat    `json:"amount"`
+	BalanceBefore RawFloat    `json:"balance_before"`
+	BalanceAfter  RawFloat    `json:"balance_after"`
+	Description   RawString   `json:"description"`
+	ReferenceID   *RawString  `json:"reference_id,omitempty"`
+	CreatedAt     RawDateTime `json:"created_at"`
+}
+
+// RelationsWalletMutation holds the relation data separately
+type RelationsWalletMutation struct {
+	User *UserModel `json:"user,omitempty"`
+}
+
+func (r WalletMutationModel) ReferenceID() (value String, ok bool) {
+	if r.InnerWalletMutation.ReferenceID == nil {
+		return value, false
+	}
+	return *r.InnerWalletMutation.ReferenceID, true
+}
+
+func (r WalletMutationModel) User() (value *UserModel) {
+	if r.RelationsWalletMutation.User == nil {
+		panic("attempted to access user but did not fetch it using the .With() syntax")
+	}
+	return r.RelationsWalletMutation.User
+}
+
 // --- template query.gotpl ---
 
 // User acts as a namespaces to access query methods for the User model
@@ -2993,6 +3355,11 @@ type userQuery struct {
 	// @optional
 	LastLogin userQueryLastLoginDateTime
 
+	// Balance
+	//
+	// @required
+	Balance userQueryBalanceFloat
+
 	// CreatedAt
 	//
 	// @required
@@ -3018,6 +3385,10 @@ type userQuery struct {
 	APIKeys userQueryAPIKeysRelations
 
 	InternalOrders userQueryInternalOrdersRelations
+
+	Topups userQueryTopupsRelations
+
+	Mutations userQueryMutationsRelations
 
 	// Relevance_
 	//
@@ -6869,6 +7240,405 @@ func (r userQueryLastLoginDateTime) Field() userPrismaFields {
 }
 
 // base struct
+type userQueryBalanceFloat struct{}
+
+// Set the required value of Balance
+func (r userQueryBalanceFloat) Set(value float64) userSetParam {
+
+	return userSetParam{
+		data: builder.Field{
+			Name:  "balance",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Balance dynamically
+func (r userQueryBalanceFloat) SetIfPresent(value *Float) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of Balance
+func (r userQueryBalanceFloat) Increment(value float64) userSetParam {
+	return userSetParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) IncrementIfPresent(value *float64) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of Balance
+func (r userQueryBalanceFloat) Decrement(value float64) userSetParam {
+	return userSetParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) DecrementIfPresent(value *float64) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of Balance
+func (r userQueryBalanceFloat) Multiply(value float64) userSetParam {
+	return userSetParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) MultiplyIfPresent(value *float64) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of Balance
+func (r userQueryBalanceFloat) Divide(value float64) userSetParam {
+	return userSetParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) DivideIfPresent(value *float64) userSetParam {
+	if value == nil {
+		return userSetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r userQueryBalanceFloat) Equals(value float64) userWithPrismaBalanceEqualsParam {
+
+	return userWithPrismaBalanceEqualsParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) EqualsIfPresent(value *float64) userWithPrismaBalanceEqualsParam {
+	if value == nil {
+		return userWithPrismaBalanceEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r userQueryBalanceFloat) Order(direction SortOrder) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name:  "balance",
+			Value: direction,
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) Cursor(cursor float64) userCursorParam {
+	return userCursorParam{
+		data: builder.Field{
+			Name:  "balance",
+			Value: cursor,
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) In(value []float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) InIfPresent(value []float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r userQueryBalanceFloat) NotIn(value []float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) NotInIfPresent(value []float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r userQueryBalanceFloat) Lt(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) LtIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r userQueryBalanceFloat) Lte(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) LteIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r userQueryBalanceFloat) Gt(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) GtIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r userQueryBalanceFloat) Gte(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) GteIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r userQueryBalanceFloat) Not(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryBalanceFloat) NotIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r userQueryBalanceFloat) LT(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r userQueryBalanceFloat) LTIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r userQueryBalanceFloat) LTE(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r userQueryBalanceFloat) LTEIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r userQueryBalanceFloat) GT(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r userQueryBalanceFloat) GTIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r userQueryBalanceFloat) GTE(value float64) userDefaultParam {
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "balance",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r userQueryBalanceFloat) GTEIfPresent(value *float64) userDefaultParam {
+	if value == nil {
+		return userDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r userQueryBalanceFloat) Field() userPrismaFields {
+	return userFieldBalance
+}
+
+// base struct
 type userQueryCreatedAtDateTime struct{}
 
 // Set the required value of CreatedAt
@@ -8788,6 +9558,350 @@ func (r userQueryInternalOrdersRelations) Unlink(
 
 func (r userQueryInternalOrdersInternalOrder) Field() userPrismaFields {
 	return userFieldInternalOrders
+}
+
+// base struct
+type userQueryTopupsTopUp struct{}
+
+type userQueryTopupsRelations struct{}
+
+// User -> Topups
+//
+// @relation
+// @required
+func (userQueryTopupsRelations) Some(
+	params ...TopUpWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "topups",
+			Fields: []builder.Field{
+				{
+					Name:   "some",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> Topups
+//
+// @relation
+// @required
+func (userQueryTopupsRelations) Every(
+	params ...TopUpWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "topups",
+			Fields: []builder.Field{
+				{
+					Name:   "every",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> Topups
+//
+// @relation
+// @required
+func (userQueryTopupsRelations) None(
+	params ...TopUpWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "topups",
+			Fields: []builder.Field{
+				{
+					Name:   "none",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (userQueryTopupsRelations) Fetch(
+
+	params ...TopUpWhereParam,
+
+) userToTopupsFindMany {
+	var v userToTopupsFindMany
+
+	v.query.Operation = "query"
+	v.query.Method = "topups"
+	v.query.Outputs = topUpOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r userQueryTopupsRelations) Link(
+	params ...TopUpWhereParam,
+) userSetParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userSetParam{
+		data: builder.Field{
+			Name: "topups",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+
+					List:     true,
+					WrapList: true,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryTopupsRelations) Unlink(
+	params ...TopUpWhereParam,
+) userSetParam {
+	var v userSetParam
+
+	var fields []builder.Field
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+	v = userSetParam{
+		data: builder.Field{
+			Name: "topups",
+			Fields: []builder.Field{
+				{
+					Name:     "disconnect",
+					List:     true,
+					WrapList: true,
+					Fields:   builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r userQueryTopupsTopUp) Field() userPrismaFields {
+	return userFieldTopups
+}
+
+// base struct
+type userQueryMutationsWalletMutation struct{}
+
+type userQueryMutationsRelations struct{}
+
+// User -> Mutations
+//
+// @relation
+// @required
+func (userQueryMutationsRelations) Some(
+	params ...WalletMutationWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "mutations",
+			Fields: []builder.Field{
+				{
+					Name:   "some",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> Mutations
+//
+// @relation
+// @required
+func (userQueryMutationsRelations) Every(
+	params ...WalletMutationWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "mutations",
+			Fields: []builder.Field{
+				{
+					Name:   "every",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+// User -> Mutations
+//
+// @relation
+// @required
+func (userQueryMutationsRelations) None(
+	params ...WalletMutationWhereParam,
+) userDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userDefaultParam{
+		data: builder.Field{
+			Name: "mutations",
+			Fields: []builder.Field{
+				{
+					Name:   "none",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (userQueryMutationsRelations) Fetch(
+
+	params ...WalletMutationWhereParam,
+
+) userToMutationsFindMany {
+	var v userToMutationsFindMany
+
+	v.query.Operation = "query"
+	v.query.Method = "mutations"
+	v.query.Outputs = walletMutationOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r userQueryMutationsRelations) Link(
+	params ...WalletMutationWhereParam,
+) userSetParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return userSetParam{
+		data: builder.Field{
+			Name: "mutations",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+
+					List:     true,
+					WrapList: true,
+				},
+			},
+		},
+	}
+}
+
+func (r userQueryMutationsRelations) Unlink(
+	params ...WalletMutationWhereParam,
+) userSetParam {
+	var v userSetParam
+
+	var fields []builder.Field
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+	v = userSetParam{
+		data: builder.Field{
+			Name: "mutations",
+			Fields: []builder.Field{
+				{
+					Name:     "disconnect",
+					List:     true,
+					WrapList: true,
+					Fields:   builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r userQueryMutationsWalletMutation) Field() userPrismaFields {
+	return userFieldMutations
 }
 
 // base struct
@@ -13620,6 +14734,11 @@ type supplierQuery struct {
 	// @optional
 	BaseURL supplierQueryBaseURLString
 
+	// WebhookInbound
+	//
+	// @optional
+	WebhookInbound supplierQueryWebhookInboundString
+
 	// Status
 	//
 	// @required
@@ -16262,6 +17381,398 @@ func (r supplierQueryBaseURLString) HasSuffixIfPresent(value *string) supplierDe
 
 func (r supplierQueryBaseURLString) Field() supplierPrismaFields {
 	return supplierFieldBaseURL
+}
+
+// base struct
+type supplierQueryWebhookInboundString struct{}
+
+// Set the optional value of WebhookInbound
+func (r supplierQueryWebhookInboundString) Set(value string) supplierSetParam {
+
+	return supplierSetParam{
+		data: builder.Field{
+			Name:  "webhook_inbound",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of WebhookInbound dynamically
+func (r supplierQueryWebhookInboundString) SetIfPresent(value *String) supplierSetParam {
+	if value == nil {
+		return supplierSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of WebhookInbound dynamically
+func (r supplierQueryWebhookInboundString) SetOptional(value *String) supplierSetParam {
+	if value == nil {
+
+		var v *string
+		return supplierSetParam{
+			data: builder.Field{
+				Name:  "webhook_inbound",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Equals(value string) supplierWithPrismaWebhookInboundEqualsParam {
+
+	return supplierWithPrismaWebhookInboundEqualsParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) EqualsIfPresent(value *string) supplierWithPrismaWebhookInboundEqualsParam {
+	if value == nil {
+		return supplierWithPrismaWebhookInboundEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r supplierQueryWebhookInboundString) EqualsOptional(value *String) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) IsNull() supplierDefaultParam {
+	var str *string = nil
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) Order(direction SortOrder) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name:  "webhook_inbound",
+			Value: direction,
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) Cursor(cursor string) supplierCursorParam {
+	return supplierCursorParam{
+		data: builder.Field{
+			Name:  "webhook_inbound",
+			Value: cursor,
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) In(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) InIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r supplierQueryWebhookInboundString) NotIn(value []string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) NotInIfPresent(value []string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r supplierQueryWebhookInboundString) Lt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) LtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Lte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) LteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Gt(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) GtIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Gte(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) GteIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Contains(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) ContainsIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r supplierQueryWebhookInboundString) StartsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) StartsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r supplierQueryWebhookInboundString) EndsWith(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) EndsWithIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Search(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) SearchIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Not(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r supplierQueryWebhookInboundString) NotIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r supplierQueryWebhookInboundString) HasPrefix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r supplierQueryWebhookInboundString) HasPrefixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r supplierQueryWebhookInboundString) HasSuffix(value string) supplierDefaultParam {
+	return supplierDefaultParam{
+		data: builder.Field{
+			Name: "webhook_inbound",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r supplierQueryWebhookInboundString) HasSuffixIfPresent(value *string) supplierDefaultParam {
+	if value == nil {
+		return supplierDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r supplierQueryWebhookInboundString) Field() supplierPrismaFields {
+	return supplierFieldWebhookInbound
 }
 
 // base struct
@@ -28633,6 +30144,24 @@ func (supplierProductQuery) And(params ...SupplierProductWhereParam) supplierPro
 			List:     true,
 			WrapList: true,
 			Fields:   fields,
+		},
+	}
+}
+
+func (supplierProductQuery) SupplierProductIDSupplierID(
+	_supplierProductID SupplierProductWithPrismaSupplierProductIDWhereParam,
+
+	_supplierID SupplierProductWithPrismaSupplierIDWhereParam,
+) SupplierProductEqualsUniqueWhereParam {
+	var fields []builder.Field
+
+	fields = append(fields, _supplierProductID.field())
+	fields = append(fields, _supplierID.field())
+
+	return supplierProductEqualsUniqueParam{
+		data: builder.Field{
+			Name:   "supplierProductID_supplier_id",
+			Fields: builder.TransformEquals(fields),
 		},
 	}
 }
@@ -49672,6 +51201,6274 @@ func (r paymentTypeQueryRelevancePaymentTypeOrderByRelevanceInput) Field() payme
 	return paymentTypeFieldRelevance
 }
 
+// TopUp acts as a namespaces to access query methods for the TopUp model
+var TopUp = topUpQuery{}
+
+// topUpQuery exposes query functions for the topUp model
+type topUpQuery struct {
+
+	// ID
+	//
+	// @required
+	ID topUpQueryIDString
+
+	// UserID
+	//
+	// @required
+	UserID topUpQueryUserIDString
+
+	// Amount
+	//
+	// @required
+	Amount topUpQueryAmountFloat
+
+	// PaymentMethod
+	//
+	// @optional
+	PaymentMethod topUpQueryPaymentMethodString
+
+	// Status
+	//
+	// @required
+	Status topUpQueryStatusString
+
+	// CreatedAt
+	//
+	// @required
+	CreatedAt topUpQueryCreatedAtDateTime
+
+	// UpdatedAt
+	//
+	// @required
+	UpdatedAt topUpQueryUpdatedAtDateTime
+
+	User topUpQueryUserRelations
+
+	// Relevance_
+	//
+	// @optional
+	Relevance_ topUpQueryRelevanceTopUpOrderByRelevanceInput
+}
+
+func (topUpQuery) Not(params ...TopUpWhereParam) topUpDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:     "NOT",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (topUpQuery) Or(params ...TopUpWhereParam) topUpDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:     "OR",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (topUpQuery) And(params ...TopUpWhereParam) topUpDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:     "AND",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+// base struct
+type topUpQueryIDString struct{}
+
+// Set the required value of ID
+func (r topUpQueryIDString) Set(value string) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of ID dynamically
+func (r topUpQueryIDString) SetIfPresent(value *String) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryIDString) Equals(value string) topUpWithPrismaIDEqualsUniqueParam {
+
+	return topUpWithPrismaIDEqualsUniqueParam{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) EqualsIfPresent(value *string) topUpWithPrismaIDEqualsUniqueParam {
+	if value == nil {
+		return topUpWithPrismaIDEqualsUniqueParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryIDString) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryIDString) Cursor(cursor string) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryIDString) In(value []string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) InIfPresent(value []string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryIDString) NotIn(value []string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) NotInIfPresent(value []string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryIDString) Lt(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) LtIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryIDString) Lte(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) LteIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryIDString) Gt(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) GtIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryIDString) Gte(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) GteIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryIDString) Contains(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) ContainsIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Contains(*value)
+}
+
+func (r topUpQueryIDString) StartsWith(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) StartsWithIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r topUpQueryIDString) EndsWith(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) EndsWithIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r topUpQueryIDString) Search(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) SearchIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Search(*value)
+}
+
+func (r topUpQueryIDString) Not(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryIDString) NotIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r topUpQueryIDString) HasPrefix(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r topUpQueryIDString) HasPrefixIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r topUpQueryIDString) HasSuffix(value string) topUpParamUnique {
+	return topUpParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r topUpQueryIDString) HasSuffixIfPresent(value *string) topUpParamUnique {
+	if value == nil {
+		return topUpParamUnique{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r topUpQueryIDString) Field() topUpPrismaFields {
+	return topUpFieldID
+}
+
+// base struct
+type topUpQueryUserIDString struct{}
+
+// Set the required value of UserID
+func (r topUpQueryUserIDString) Set(value string) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of UserID dynamically
+func (r topUpQueryUserIDString) SetIfPresent(value *String) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryUserIDString) Equals(value string) topUpWithPrismaUserIDEqualsParam {
+
+	return topUpWithPrismaUserIDEqualsParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) EqualsIfPresent(value *string) topUpWithPrismaUserIDEqualsParam {
+	if value == nil {
+		return topUpWithPrismaUserIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryUserIDString) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) Cursor(cursor string) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) In(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) InIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryUserIDString) NotIn(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) NotInIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryUserIDString) Lt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) LtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryUserIDString) Lte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) LteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryUserIDString) Gt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) GtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryUserIDString) Gte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) GteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryUserIDString) Contains(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) ContainsIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r topUpQueryUserIDString) StartsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) StartsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r topUpQueryUserIDString) EndsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) EndsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r topUpQueryUserIDString) Search(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) SearchIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r topUpQueryUserIDString) Not(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserIDString) NotIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r topUpQueryUserIDString) HasPrefix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r topUpQueryUserIDString) HasPrefixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r topUpQueryUserIDString) HasSuffix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r topUpQueryUserIDString) HasSuffixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r topUpQueryUserIDString) Field() topUpPrismaFields {
+	return topUpFieldUserID
+}
+
+// base struct
+type topUpQueryAmountFloat struct{}
+
+// Set the required value of Amount
+func (r topUpQueryAmountFloat) Set(value float64) topUpWithPrismaAmountSetParam {
+
+	return topUpWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Amount dynamically
+func (r topUpQueryAmountFloat) SetIfPresent(value *Float) topUpWithPrismaAmountSetParam {
+	if value == nil {
+		return topUpWithPrismaAmountSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of Amount
+func (r topUpQueryAmountFloat) Increment(value float64) topUpWithPrismaAmountSetParam {
+	return topUpWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) IncrementIfPresent(value *float64) topUpWithPrismaAmountSetParam {
+	if value == nil {
+		return topUpWithPrismaAmountSetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of Amount
+func (r topUpQueryAmountFloat) Decrement(value float64) topUpWithPrismaAmountSetParam {
+	return topUpWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) DecrementIfPresent(value *float64) topUpWithPrismaAmountSetParam {
+	if value == nil {
+		return topUpWithPrismaAmountSetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of Amount
+func (r topUpQueryAmountFloat) Multiply(value float64) topUpWithPrismaAmountSetParam {
+	return topUpWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) MultiplyIfPresent(value *float64) topUpWithPrismaAmountSetParam {
+	if value == nil {
+		return topUpWithPrismaAmountSetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of Amount
+func (r topUpQueryAmountFloat) Divide(value float64) topUpWithPrismaAmountSetParam {
+	return topUpWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) DivideIfPresent(value *float64) topUpWithPrismaAmountSetParam {
+	if value == nil {
+		return topUpWithPrismaAmountSetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r topUpQueryAmountFloat) Equals(value float64) topUpWithPrismaAmountEqualsParam {
+
+	return topUpWithPrismaAmountEqualsParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) EqualsIfPresent(value *float64) topUpWithPrismaAmountEqualsParam {
+	if value == nil {
+		return topUpWithPrismaAmountEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryAmountFloat) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) Cursor(cursor float64) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) In(value []float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) InIfPresent(value []float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryAmountFloat) NotIn(value []float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) NotInIfPresent(value []float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryAmountFloat) Lt(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) LtIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryAmountFloat) Lte(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) LteIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryAmountFloat) Gt(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) GtIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryAmountFloat) Gte(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) GteIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryAmountFloat) Not(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryAmountFloat) NotIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r topUpQueryAmountFloat) LT(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r topUpQueryAmountFloat) LTIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r topUpQueryAmountFloat) LTE(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r topUpQueryAmountFloat) LTEIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r topUpQueryAmountFloat) GT(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r topUpQueryAmountFloat) GTIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r topUpQueryAmountFloat) GTE(value float64) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r topUpQueryAmountFloat) GTEIfPresent(value *float64) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r topUpQueryAmountFloat) Field() topUpPrismaFields {
+	return topUpFieldAmount
+}
+
+// base struct
+type topUpQueryPaymentMethodString struct{}
+
+// Set the optional value of PaymentMethod
+func (r topUpQueryPaymentMethodString) Set(value string) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "payment_method",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of PaymentMethod dynamically
+func (r topUpQueryPaymentMethodString) SetIfPresent(value *String) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of PaymentMethod dynamically
+func (r topUpQueryPaymentMethodString) SetOptional(value *String) topUpSetParam {
+	if value == nil {
+
+		var v *string
+		return topUpSetParam{
+			data: builder.Field{
+				Name:  "payment_method",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Equals(value string) topUpWithPrismaPaymentMethodEqualsParam {
+
+	return topUpWithPrismaPaymentMethodEqualsParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) EqualsIfPresent(value *string) topUpWithPrismaPaymentMethodEqualsParam {
+	if value == nil {
+		return topUpWithPrismaPaymentMethodEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryPaymentMethodString) EqualsOptional(value *String) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) IsNull() topUpDefaultParam {
+	var str *string = nil
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "payment_method",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) Cursor(cursor string) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "payment_method",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) In(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) InIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryPaymentMethodString) NotIn(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) NotInIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryPaymentMethodString) Lt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) LtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Lte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) LteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Gt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) GtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Gte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) GteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Contains(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) ContainsIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r topUpQueryPaymentMethodString) StartsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) StartsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r topUpQueryPaymentMethodString) EndsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) EndsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Search(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) SearchIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Not(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryPaymentMethodString) NotIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r topUpQueryPaymentMethodString) HasPrefix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r topUpQueryPaymentMethodString) HasPrefixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r topUpQueryPaymentMethodString) HasSuffix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "payment_method",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r topUpQueryPaymentMethodString) HasSuffixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r topUpQueryPaymentMethodString) Field() topUpPrismaFields {
+	return topUpFieldPaymentMethod
+}
+
+// base struct
+type topUpQueryStatusString struct{}
+
+// Set the required value of Status
+func (r topUpQueryStatusString) Set(value string) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "status",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Status dynamically
+func (r topUpQueryStatusString) SetIfPresent(value *String) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryStatusString) Equals(value string) topUpWithPrismaStatusEqualsParam {
+
+	return topUpWithPrismaStatusEqualsParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) EqualsIfPresent(value *string) topUpWithPrismaStatusEqualsParam {
+	if value == nil {
+		return topUpWithPrismaStatusEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryStatusString) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "status",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryStatusString) Cursor(cursor string) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "status",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryStatusString) In(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) InIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryStatusString) NotIn(value []string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) NotInIfPresent(value []string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryStatusString) Lt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) LtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryStatusString) Lte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) LteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryStatusString) Gt(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) GtIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryStatusString) Gte(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) GteIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryStatusString) Contains(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) ContainsIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r topUpQueryStatusString) StartsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) StartsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r topUpQueryStatusString) EndsWith(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) EndsWithIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r topUpQueryStatusString) Search(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) SearchIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r topUpQueryStatusString) Not(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryStatusString) NotIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r topUpQueryStatusString) HasPrefix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r topUpQueryStatusString) HasPrefixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r topUpQueryStatusString) HasSuffix(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "status",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r topUpQueryStatusString) HasSuffixIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r topUpQueryStatusString) Field() topUpPrismaFields {
+	return topUpFieldStatus
+}
+
+// base struct
+type topUpQueryCreatedAtDateTime struct{}
+
+// Set the required value of CreatedAt
+func (r topUpQueryCreatedAtDateTime) Set(value DateTime) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of CreatedAt dynamically
+func (r topUpQueryCreatedAtDateTime) SetIfPresent(value *DateTime) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Equals(value DateTime) topUpWithPrismaCreatedAtEqualsParam {
+
+	return topUpWithPrismaCreatedAtEqualsParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) EqualsIfPresent(value *DateTime) topUpWithPrismaCreatedAtEqualsParam {
+	if value == nil {
+		return topUpWithPrismaCreatedAtEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) Cursor(cursor DateTime) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) In(value []DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) InIfPresent(value []DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryCreatedAtDateTime) NotIn(value []DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) NotInIfPresent(value []DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Lt(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) LtIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Lte(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) LteIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Gt(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) GtIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Gte(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) GteIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Not(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryCreatedAtDateTime) NotIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r topUpQueryCreatedAtDateTime) Before(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r topUpQueryCreatedAtDateTime) BeforeIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Before(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r topUpQueryCreatedAtDateTime) After(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r topUpQueryCreatedAtDateTime) AfterIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.After(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r topUpQueryCreatedAtDateTime) BeforeEquals(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r topUpQueryCreatedAtDateTime) BeforeEqualsIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.BeforeEquals(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r topUpQueryCreatedAtDateTime) AfterEquals(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r topUpQueryCreatedAtDateTime) AfterEqualsIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.AfterEquals(*value)
+}
+
+func (r topUpQueryCreatedAtDateTime) Field() topUpPrismaFields {
+	return topUpFieldCreatedAt
+}
+
+// base struct
+type topUpQueryUpdatedAtDateTime struct{}
+
+// Set the required value of UpdatedAt
+func (r topUpQueryUpdatedAtDateTime) Set(value DateTime) topUpSetParam {
+
+	return topUpSetParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of UpdatedAt dynamically
+func (r topUpQueryUpdatedAtDateTime) SetIfPresent(value *DateTime) topUpSetParam {
+	if value == nil {
+		return topUpSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Equals(value DateTime) topUpWithPrismaUpdatedAtEqualsParam {
+
+	return topUpWithPrismaUpdatedAtEqualsParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) EqualsIfPresent(value *DateTime) topUpWithPrismaUpdatedAtEqualsParam {
+	if value == nil {
+		return topUpWithPrismaUpdatedAtEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Order(direction SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: direction,
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) Cursor(cursor DateTime) topUpCursorParam {
+	return topUpCursorParam{
+		data: builder.Field{
+			Name:  "updated_at",
+			Value: cursor,
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) In(value []DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) InIfPresent(value []DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) NotIn(value []DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) NotInIfPresent(value []DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Lt(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) LtIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Lte(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) LteIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Gt(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) GtIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Gte(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) GteIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Not(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUpdatedAtDateTime) NotIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r topUpQueryUpdatedAtDateTime) Before(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r topUpQueryUpdatedAtDateTime) BeforeIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Before(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r topUpQueryUpdatedAtDateTime) After(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r topUpQueryUpdatedAtDateTime) AfterIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.After(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r topUpQueryUpdatedAtDateTime) BeforeEquals(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r topUpQueryUpdatedAtDateTime) BeforeEqualsIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.BeforeEquals(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r topUpQueryUpdatedAtDateTime) AfterEquals(value DateTime) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "updated_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r topUpQueryUpdatedAtDateTime) AfterEqualsIfPresent(value *DateTime) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.AfterEquals(*value)
+}
+
+func (r topUpQueryUpdatedAtDateTime) Field() topUpPrismaFields {
+	return topUpFieldUpdatedAt
+}
+
+// base struct
+type topUpQueryUserUser struct{}
+
+type topUpQueryUserRelations struct{}
+
+// TopUp -> User
+//
+// @relation
+// @required
+func (topUpQueryUserRelations) Where(
+	params ...UserWhereParam,
+) topUpDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "is",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (topUpQueryUserRelations) Fetch() topUpToUserFindUnique {
+	var v topUpToUserFindUnique
+
+	v.query.Operation = "query"
+	v.query.Method = "user"
+	v.query.Outputs = userOutput
+
+	return v
+}
+
+func (r topUpQueryUserRelations) Link(
+	params UserWhereParam,
+) topUpWithPrismaUserSetParam {
+	var fields []builder.Field
+
+	f := params.field()
+	if f.Fields == nil && f.Value == nil {
+		return topUpWithPrismaUserSetParam{}
+	}
+
+	fields = append(fields, f)
+
+	return topUpWithPrismaUserSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryUserRelations) Unlink() topUpWithPrismaUserSetParam {
+	var v topUpWithPrismaUserSetParam
+
+	v = topUpWithPrismaUserSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:  "disconnect",
+					Value: true,
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r topUpQueryUserUser) Field() topUpPrismaFields {
+	return topUpFieldUser
+}
+
+// base struct
+type topUpQueryRelevanceTopUpOrderByRelevanceInput struct{}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) Fields(value []TopUpOrderByRelevanceFieldEnum) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "fields",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) FieldsIfPresent(value []TopUpOrderByRelevanceFieldEnum) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Fields(value)
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) Sort(value SortOrder) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "sort",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) SortIfPresent(value *SortOrder) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Sort(*value)
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) Search(value string) topUpDefaultParam {
+	return topUpDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) SearchIfPresent(value *string) topUpDefaultParam {
+	if value == nil {
+		return topUpDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r topUpQueryRelevanceTopUpOrderByRelevanceInput) Field() topUpPrismaFields {
+	return topUpFieldRelevance
+}
+
+// WalletMutation acts as a namespaces to access query methods for the WalletMutation model
+var WalletMutation = walletMutationQuery{}
+
+// walletMutationQuery exposes query functions for the walletMutation model
+type walletMutationQuery struct {
+
+	// ID
+	//
+	// @required
+	ID walletMutationQueryIDString
+
+	// UserID
+	//
+	// @required
+	UserID walletMutationQueryUserIDString
+
+	// Type
+	//
+	// @required
+	Type walletMutationQueryTypeString
+
+	// Amount
+	//
+	// @required
+	Amount walletMutationQueryAmountFloat
+
+	// BalanceBefore
+	//
+	// @required
+	BalanceBefore walletMutationQueryBalanceBeforeFloat
+
+	// BalanceAfter
+	//
+	// @required
+	BalanceAfter walletMutationQueryBalanceAfterFloat
+
+	// Description
+	//
+	// @required
+	Description walletMutationQueryDescriptionString
+
+	// ReferenceID
+	//
+	// @optional
+	ReferenceID walletMutationQueryReferenceIDString
+
+	// CreatedAt
+	//
+	// @required
+	CreatedAt walletMutationQueryCreatedAtDateTime
+
+	User walletMutationQueryUserRelations
+
+	// Relevance_
+	//
+	// @optional
+	Relevance_ walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput
+}
+
+func (walletMutationQuery) Not(params ...WalletMutationWhereParam) walletMutationDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:     "NOT",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (walletMutationQuery) Or(params ...WalletMutationWhereParam) walletMutationDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:     "OR",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+func (walletMutationQuery) And(params ...WalletMutationWhereParam) walletMutationDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:     "AND",
+			List:     true,
+			WrapList: true,
+			Fields:   fields,
+		},
+	}
+}
+
+// base struct
+type walletMutationQueryIDString struct{}
+
+// Set the required value of ID
+func (r walletMutationQueryIDString) Set(value string) walletMutationSetParam {
+
+	return walletMutationSetParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of ID dynamically
+func (r walletMutationQueryIDString) SetIfPresent(value *String) walletMutationSetParam {
+	if value == nil {
+		return walletMutationSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryIDString) Equals(value string) walletMutationWithPrismaIDEqualsUniqueParam {
+
+	return walletMutationWithPrismaIDEqualsUniqueParam{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) EqualsIfPresent(value *string) walletMutationWithPrismaIDEqualsUniqueParam {
+	if value == nil {
+		return walletMutationWithPrismaIDEqualsUniqueParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryIDString) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) Cursor(cursor string) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) In(value []string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) InIfPresent(value []string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryIDString) NotIn(value []string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) NotInIfPresent(value []string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryIDString) Lt(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) LtIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryIDString) Lte(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) LteIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryIDString) Gt(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) GtIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryIDString) Gte(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) GteIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryIDString) Contains(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) ContainsIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Contains(*value)
+}
+
+func (r walletMutationQueryIDString) StartsWith(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) StartsWithIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r walletMutationQueryIDString) EndsWith(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) EndsWithIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r walletMutationQueryIDString) Search(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) SearchIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryIDString) Not(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryIDString) NotIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r walletMutationQueryIDString) HasPrefix(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r walletMutationQueryIDString) HasPrefixIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r walletMutationQueryIDString) HasSuffix(value string) walletMutationParamUnique {
+	return walletMutationParamUnique{
+		data: builder.Field{
+			Name: "id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r walletMutationQueryIDString) HasSuffixIfPresent(value *string) walletMutationParamUnique {
+	if value == nil {
+		return walletMutationParamUnique{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r walletMutationQueryIDString) Field() walletMutationPrismaFields {
+	return walletMutationFieldID
+}
+
+// base struct
+type walletMutationQueryUserIDString struct{}
+
+// Set the required value of UserID
+func (r walletMutationQueryUserIDString) Set(value string) walletMutationSetParam {
+
+	return walletMutationSetParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of UserID dynamically
+func (r walletMutationQueryUserIDString) SetIfPresent(value *String) walletMutationSetParam {
+	if value == nil {
+		return walletMutationSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryUserIDString) Equals(value string) walletMutationWithPrismaUserIDEqualsParam {
+
+	return walletMutationWithPrismaUserIDEqualsParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) EqualsIfPresent(value *string) walletMutationWithPrismaUserIDEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaUserIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryUserIDString) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) Cursor(cursor string) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "user_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) In(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) InIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryUserIDString) NotIn(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) NotInIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryUserIDString) Lt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) LtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryUserIDString) Lte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) LteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryUserIDString) Gt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) GtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryUserIDString) Gte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) GteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryUserIDString) Contains(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) ContainsIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r walletMutationQueryUserIDString) StartsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) StartsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r walletMutationQueryUserIDString) EndsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) EndsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r walletMutationQueryUserIDString) Search(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) SearchIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryUserIDString) Not(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserIDString) NotIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r walletMutationQueryUserIDString) HasPrefix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r walletMutationQueryUserIDString) HasPrefixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r walletMutationQueryUserIDString) HasSuffix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r walletMutationQueryUserIDString) HasSuffixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r walletMutationQueryUserIDString) Field() walletMutationPrismaFields {
+	return walletMutationFieldUserID
+}
+
+// base struct
+type walletMutationQueryTypeString struct{}
+
+// Set the required value of Type
+func (r walletMutationQueryTypeString) Set(value string) walletMutationWithPrismaTypeSetParam {
+
+	return walletMutationWithPrismaTypeSetParam{
+		data: builder.Field{
+			Name:  "type",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Type dynamically
+func (r walletMutationQueryTypeString) SetIfPresent(value *String) walletMutationWithPrismaTypeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaTypeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryTypeString) Equals(value string) walletMutationWithPrismaTypeEqualsParam {
+
+	return walletMutationWithPrismaTypeEqualsParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) EqualsIfPresent(value *string) walletMutationWithPrismaTypeEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaTypeEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryTypeString) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "type",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) Cursor(cursor string) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "type",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) In(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) InIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryTypeString) NotIn(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) NotInIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryTypeString) Lt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) LtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryTypeString) Lte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) LteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryTypeString) Gt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) GtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryTypeString) Gte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) GteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryTypeString) Contains(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) ContainsIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r walletMutationQueryTypeString) StartsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) StartsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r walletMutationQueryTypeString) EndsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) EndsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r walletMutationQueryTypeString) Search(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) SearchIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryTypeString) Not(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryTypeString) NotIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r walletMutationQueryTypeString) HasPrefix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r walletMutationQueryTypeString) HasPrefixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r walletMutationQueryTypeString) HasSuffix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "type",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r walletMutationQueryTypeString) HasSuffixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r walletMutationQueryTypeString) Field() walletMutationPrismaFields {
+	return walletMutationFieldType
+}
+
+// base struct
+type walletMutationQueryAmountFloat struct{}
+
+// Set the required value of Amount
+func (r walletMutationQueryAmountFloat) Set(value float64) walletMutationWithPrismaAmountSetParam {
+
+	return walletMutationWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Amount dynamically
+func (r walletMutationQueryAmountFloat) SetIfPresent(value *Float) walletMutationWithPrismaAmountSetParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of Amount
+func (r walletMutationQueryAmountFloat) Increment(value float64) walletMutationWithPrismaAmountSetParam {
+	return walletMutationWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) IncrementIfPresent(value *float64) walletMutationWithPrismaAmountSetParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountSetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of Amount
+func (r walletMutationQueryAmountFloat) Decrement(value float64) walletMutationWithPrismaAmountSetParam {
+	return walletMutationWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) DecrementIfPresent(value *float64) walletMutationWithPrismaAmountSetParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountSetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of Amount
+func (r walletMutationQueryAmountFloat) Multiply(value float64) walletMutationWithPrismaAmountSetParam {
+	return walletMutationWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) MultiplyIfPresent(value *float64) walletMutationWithPrismaAmountSetParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountSetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of Amount
+func (r walletMutationQueryAmountFloat) Divide(value float64) walletMutationWithPrismaAmountSetParam {
+	return walletMutationWithPrismaAmountSetParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) DivideIfPresent(value *float64) walletMutationWithPrismaAmountSetParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountSetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Equals(value float64) walletMutationWithPrismaAmountEqualsParam {
+
+	return walletMutationWithPrismaAmountEqualsParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) EqualsIfPresent(value *float64) walletMutationWithPrismaAmountEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaAmountEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) Cursor(cursor float64) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "amount",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) In(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) InIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryAmountFloat) NotIn(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) NotInIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryAmountFloat) Lt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) LtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Lte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) LteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Gt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) GtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Gte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) GteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Not(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryAmountFloat) NotIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r walletMutationQueryAmountFloat) LT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r walletMutationQueryAmountFloat) LTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r walletMutationQueryAmountFloat) LTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r walletMutationQueryAmountFloat) LTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r walletMutationQueryAmountFloat) GT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r walletMutationQueryAmountFloat) GTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r walletMutationQueryAmountFloat) GTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "amount",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r walletMutationQueryAmountFloat) GTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r walletMutationQueryAmountFloat) Field() walletMutationPrismaFields {
+	return walletMutationFieldAmount
+}
+
+// base struct
+type walletMutationQueryBalanceBeforeFloat struct{}
+
+// Set the required value of BalanceBefore
+func (r walletMutationQueryBalanceBeforeFloat) Set(value float64) walletMutationWithPrismaBalanceBeforeSetParam {
+
+	return walletMutationWithPrismaBalanceBeforeSetParam{
+		data: builder.Field{
+			Name:  "balance_before",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of BalanceBefore dynamically
+func (r walletMutationQueryBalanceBeforeFloat) SetIfPresent(value *Float) walletMutationWithPrismaBalanceBeforeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of BalanceBefore
+func (r walletMutationQueryBalanceBeforeFloat) Increment(value float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	return walletMutationWithPrismaBalanceBeforeSetParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) IncrementIfPresent(value *float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeSetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of BalanceBefore
+func (r walletMutationQueryBalanceBeforeFloat) Decrement(value float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	return walletMutationWithPrismaBalanceBeforeSetParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) DecrementIfPresent(value *float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeSetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of BalanceBefore
+func (r walletMutationQueryBalanceBeforeFloat) Multiply(value float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	return walletMutationWithPrismaBalanceBeforeSetParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) MultiplyIfPresent(value *float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeSetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of BalanceBefore
+func (r walletMutationQueryBalanceBeforeFloat) Divide(value float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	return walletMutationWithPrismaBalanceBeforeSetParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) DivideIfPresent(value *float64) walletMutationWithPrismaBalanceBeforeSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeSetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Equals(value float64) walletMutationWithPrismaBalanceBeforeEqualsParam {
+
+	return walletMutationWithPrismaBalanceBeforeEqualsParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) EqualsIfPresent(value *float64) walletMutationWithPrismaBalanceBeforeEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceBeforeEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "balance_before",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Cursor(cursor float64) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "balance_before",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) In(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) InIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) NotIn(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) NotInIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Lt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) LtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Lte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) LteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Gt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) GtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Gte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) GteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Not(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) NotIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r walletMutationQueryBalanceBeforeFloat) LT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r walletMutationQueryBalanceBeforeFloat) LTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r walletMutationQueryBalanceBeforeFloat) LTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r walletMutationQueryBalanceBeforeFloat) LTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r walletMutationQueryBalanceBeforeFloat) GT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r walletMutationQueryBalanceBeforeFloat) GTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r walletMutationQueryBalanceBeforeFloat) GTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_before",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r walletMutationQueryBalanceBeforeFloat) GTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r walletMutationQueryBalanceBeforeFloat) Field() walletMutationPrismaFields {
+	return walletMutationFieldBalanceBefore
+}
+
+// base struct
+type walletMutationQueryBalanceAfterFloat struct{}
+
+// Set the required value of BalanceAfter
+func (r walletMutationQueryBalanceAfterFloat) Set(value float64) walletMutationWithPrismaBalanceAfterSetParam {
+
+	return walletMutationWithPrismaBalanceAfterSetParam{
+		data: builder.Field{
+			Name:  "balance_after",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of BalanceAfter dynamically
+func (r walletMutationQueryBalanceAfterFloat) SetIfPresent(value *Float) walletMutationWithPrismaBalanceAfterSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Increment the required value of BalanceAfter
+func (r walletMutationQueryBalanceAfterFloat) Increment(value float64) walletMutationWithPrismaBalanceAfterSetParam {
+	return walletMutationWithPrismaBalanceAfterSetParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "increment",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) IncrementIfPresent(value *float64) walletMutationWithPrismaBalanceAfterSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterSetParam{}
+	}
+	return r.Increment(*value)
+}
+
+// Decrement the required value of BalanceAfter
+func (r walletMutationQueryBalanceAfterFloat) Decrement(value float64) walletMutationWithPrismaBalanceAfterSetParam {
+	return walletMutationWithPrismaBalanceAfterSetParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "decrement",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) DecrementIfPresent(value *float64) walletMutationWithPrismaBalanceAfterSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterSetParam{}
+	}
+	return r.Decrement(*value)
+}
+
+// Multiply the required value of BalanceAfter
+func (r walletMutationQueryBalanceAfterFloat) Multiply(value float64) walletMutationWithPrismaBalanceAfterSetParam {
+	return walletMutationWithPrismaBalanceAfterSetParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "multiply",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) MultiplyIfPresent(value *float64) walletMutationWithPrismaBalanceAfterSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterSetParam{}
+	}
+	return r.Multiply(*value)
+}
+
+// Divide the required value of BalanceAfter
+func (r walletMutationQueryBalanceAfterFloat) Divide(value float64) walletMutationWithPrismaBalanceAfterSetParam {
+	return walletMutationWithPrismaBalanceAfterSetParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				builder.Field{
+					Name:  "divide",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) DivideIfPresent(value *float64) walletMutationWithPrismaBalanceAfterSetParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterSetParam{}
+	}
+	return r.Divide(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Equals(value float64) walletMutationWithPrismaBalanceAfterEqualsParam {
+
+	return walletMutationWithPrismaBalanceAfterEqualsParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) EqualsIfPresent(value *float64) walletMutationWithPrismaBalanceAfterEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaBalanceAfterEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "balance_after",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Cursor(cursor float64) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "balance_after",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) In(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) InIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) NotIn(value []float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) NotInIfPresent(value []float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Lt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) LtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Lte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) LteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Gt(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) GtIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Gte(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) GteIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Not(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryBalanceAfterFloat) NotIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r walletMutationQueryBalanceAfterFloat) LT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r walletMutationQueryBalanceAfterFloat) LTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LT(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r walletMutationQueryBalanceAfterFloat) LTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r walletMutationQueryBalanceAfterFloat) LTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.LTE(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r walletMutationQueryBalanceAfterFloat) GT(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r walletMutationQueryBalanceAfterFloat) GTIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GT(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r walletMutationQueryBalanceAfterFloat) GTE(value float64) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "balance_after",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r walletMutationQueryBalanceAfterFloat) GTEIfPresent(value *float64) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.GTE(*value)
+}
+
+func (r walletMutationQueryBalanceAfterFloat) Field() walletMutationPrismaFields {
+	return walletMutationFieldBalanceAfter
+}
+
+// base struct
+type walletMutationQueryDescriptionString struct{}
+
+// Set the required value of Description
+func (r walletMutationQueryDescriptionString) Set(value string) walletMutationWithPrismaDescriptionSetParam {
+
+	return walletMutationWithPrismaDescriptionSetParam{
+		data: builder.Field{
+			Name:  "description",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of Description dynamically
+func (r walletMutationQueryDescriptionString) SetIfPresent(value *String) walletMutationWithPrismaDescriptionSetParam {
+	if value == nil {
+		return walletMutationWithPrismaDescriptionSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Equals(value string) walletMutationWithPrismaDescriptionEqualsParam {
+
+	return walletMutationWithPrismaDescriptionEqualsParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) EqualsIfPresent(value *string) walletMutationWithPrismaDescriptionEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaDescriptionEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "description",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) Cursor(cursor string) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "description",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) In(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) InIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryDescriptionString) NotIn(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) NotInIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryDescriptionString) Lt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) LtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Lte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) LteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Gt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) GtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Gte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) GteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Contains(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) ContainsIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r walletMutationQueryDescriptionString) StartsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) StartsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r walletMutationQueryDescriptionString) EndsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) EndsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Search(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) SearchIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Not(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryDescriptionString) NotIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r walletMutationQueryDescriptionString) HasPrefix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r walletMutationQueryDescriptionString) HasPrefixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r walletMutationQueryDescriptionString) HasSuffix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "description",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r walletMutationQueryDescriptionString) HasSuffixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r walletMutationQueryDescriptionString) Field() walletMutationPrismaFields {
+	return walletMutationFieldDescription
+}
+
+// base struct
+type walletMutationQueryReferenceIDString struct{}
+
+// Set the optional value of ReferenceID
+func (r walletMutationQueryReferenceIDString) Set(value string) walletMutationSetParam {
+
+	return walletMutationSetParam{
+		data: builder.Field{
+			Name:  "reference_id",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of ReferenceID dynamically
+func (r walletMutationQueryReferenceIDString) SetIfPresent(value *String) walletMutationSetParam {
+	if value == nil {
+		return walletMutationSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+// Set the optional value of ReferenceID dynamically
+func (r walletMutationQueryReferenceIDString) SetOptional(value *String) walletMutationSetParam {
+	if value == nil {
+
+		var v *string
+		return walletMutationSetParam{
+			data: builder.Field{
+				Name:  "reference_id",
+				Value: v,
+			},
+		}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Equals(value string) walletMutationWithPrismaReferenceIDEqualsParam {
+
+	return walletMutationWithPrismaReferenceIDEqualsParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) EqualsIfPresent(value *string) walletMutationWithPrismaReferenceIDEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaReferenceIDEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) EqualsOptional(value *String) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) IsNull() walletMutationDefaultParam {
+	var str *string = nil
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: str,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "reference_id",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) Cursor(cursor string) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "reference_id",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) In(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) InIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryReferenceIDString) NotIn(value []string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) NotInIfPresent(value []string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryReferenceIDString) Lt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) LtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Lte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) LteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Gt(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) GtIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Gte(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) GteIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Contains(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "contains",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) ContainsIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Contains(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) StartsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "startsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) StartsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.StartsWith(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) EndsWith(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "endsWith",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) EndsWithIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.EndsWith(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Search(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) SearchIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Not(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryReferenceIDString) NotIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use StartsWith instead.
+
+func (r walletMutationQueryReferenceIDString) HasPrefix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "starts_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use StartsWithIfPresent instead.
+func (r walletMutationQueryReferenceIDString) HasPrefixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasPrefix(*value)
+}
+
+// deprecated: Use EndsWith instead.
+
+func (r walletMutationQueryReferenceIDString) HasSuffix(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "reference_id",
+			Fields: []builder.Field{
+				{
+					Name:  "ends_with",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use EndsWithIfPresent instead.
+func (r walletMutationQueryReferenceIDString) HasSuffixIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.HasSuffix(*value)
+}
+
+func (r walletMutationQueryReferenceIDString) Field() walletMutationPrismaFields {
+	return walletMutationFieldReferenceID
+}
+
+// base struct
+type walletMutationQueryCreatedAtDateTime struct{}
+
+// Set the required value of CreatedAt
+func (r walletMutationQueryCreatedAtDateTime) Set(value DateTime) walletMutationSetParam {
+
+	return walletMutationSetParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: value,
+		},
+	}
+
+}
+
+// Set the optional value of CreatedAt dynamically
+func (r walletMutationQueryCreatedAtDateTime) SetIfPresent(value *DateTime) walletMutationSetParam {
+	if value == nil {
+		return walletMutationSetParam{}
+	}
+
+	return r.Set(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Equals(value DateTime) walletMutationWithPrismaCreatedAtEqualsParam {
+
+	return walletMutationWithPrismaCreatedAtEqualsParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "equals",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) EqualsIfPresent(value *DateTime) walletMutationWithPrismaCreatedAtEqualsParam {
+	if value == nil {
+		return walletMutationWithPrismaCreatedAtEqualsParam{}
+	}
+	return r.Equals(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Order(direction SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: direction,
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Cursor(cursor DateTime) walletMutationCursorParam {
+	return walletMutationCursorParam{
+		data: builder.Field{
+			Name:  "created_at",
+			Value: cursor,
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) In(value []DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "in",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) InIfPresent(value []DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.In(value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) NotIn(value []DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "notIn",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) NotInIfPresent(value []DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.NotIn(value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Lt(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) LtIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lt(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Lte(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) LteIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Lte(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Gt(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) GtIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gt(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Gte(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) GteIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Gte(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Not(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "not",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryCreatedAtDateTime) NotIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Not(*value)
+}
+
+// deprecated: Use Lt instead.
+
+func (r walletMutationQueryCreatedAtDateTime) Before(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LtIfPresent instead.
+func (r walletMutationQueryCreatedAtDateTime) BeforeIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Before(*value)
+}
+
+// deprecated: Use Gt instead.
+
+func (r walletMutationQueryCreatedAtDateTime) After(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gt",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GtIfPresent instead.
+func (r walletMutationQueryCreatedAtDateTime) AfterIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.After(*value)
+}
+
+// deprecated: Use Lte instead.
+
+func (r walletMutationQueryCreatedAtDateTime) BeforeEquals(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "lte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use LteIfPresent instead.
+func (r walletMutationQueryCreatedAtDateTime) BeforeEqualsIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.BeforeEquals(*value)
+}
+
+// deprecated: Use Gte instead.
+
+func (r walletMutationQueryCreatedAtDateTime) AfterEquals(value DateTime) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "created_at",
+			Fields: []builder.Field{
+				{
+					Name:  "gte",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+// deprecated: Use GteIfPresent instead.
+func (r walletMutationQueryCreatedAtDateTime) AfterEqualsIfPresent(value *DateTime) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.AfterEquals(*value)
+}
+
+func (r walletMutationQueryCreatedAtDateTime) Field() walletMutationPrismaFields {
+	return walletMutationFieldCreatedAt
+}
+
+// base struct
+type walletMutationQueryUserUser struct{}
+
+type walletMutationQueryUserRelations struct{}
+
+// WalletMutation -> User
+//
+// @relation
+// @required
+func (walletMutationQueryUserRelations) Where(
+	params ...UserWhereParam,
+) walletMutationDefaultParam {
+	var fields []builder.Field
+
+	for _, q := range params {
+		fields = append(fields, q.field())
+	}
+
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "is",
+					Fields: fields,
+				},
+			},
+		},
+	}
+}
+
+func (walletMutationQueryUserRelations) Fetch() walletMutationToUserFindUnique {
+	var v walletMutationToUserFindUnique
+
+	v.query.Operation = "query"
+	v.query.Method = "user"
+	v.query.Outputs = userOutput
+
+	return v
+}
+
+func (r walletMutationQueryUserRelations) Link(
+	params UserWhereParam,
+) walletMutationWithPrismaUserSetParam {
+	var fields []builder.Field
+
+	f := params.field()
+	if f.Fields == nil && f.Value == nil {
+		return walletMutationWithPrismaUserSetParam{}
+	}
+
+	fields = append(fields, f)
+
+	return walletMutationWithPrismaUserSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:   "connect",
+					Fields: builder.TransformEquals(fields),
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryUserRelations) Unlink() walletMutationWithPrismaUserSetParam {
+	var v walletMutationWithPrismaUserSetParam
+
+	v = walletMutationWithPrismaUserSetParam{
+		data: builder.Field{
+			Name: "user",
+			Fields: []builder.Field{
+				{
+					Name:  "disconnect",
+					Value: true,
+				},
+			},
+		},
+	}
+
+	return v
+}
+
+func (r walletMutationQueryUserUser) Field() walletMutationPrismaFields {
+	return walletMutationFieldUser
+}
+
+// base struct
+type walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput struct{}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) Fields(value []WalletMutationOrderByRelevanceFieldEnum) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "fields",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) FieldsIfPresent(value []WalletMutationOrderByRelevanceFieldEnum) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Fields(value)
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) Sort(value SortOrder) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "sort",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) SortIfPresent(value *SortOrder) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Sort(*value)
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) Search(value string) walletMutationDefaultParam {
+	return walletMutationDefaultParam{
+		data: builder.Field{
+			Name: "_relevance",
+			Fields: []builder.Field{
+				{
+					Name:  "search",
+					Value: value,
+				},
+			},
+		},
+	}
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) SearchIfPresent(value *string) walletMutationDefaultParam {
+	if value == nil {
+		return walletMutationDefaultParam{}
+	}
+	return r.Search(*value)
+}
+
+func (r walletMutationQueryRelevanceWalletMutationOrderByRelevanceInput) Field() walletMutationPrismaFields {
+	return walletMutationFieldRelevance
+}
+
 // --- template actions.gotpl ---
 var countOutput = []builder.Output{
 	{Name: "count"},
@@ -49693,6 +57490,7 @@ var userOutput = []builder.Output{
 	{Name: "status"},
 	{Name: "telegram_chat_id"},
 	{Name: "last_login"},
+	{Name: "balance"},
 	{Name: "created_at"},
 	{Name: "created_by"},
 	{Name: "updated_at"},
@@ -50721,6 +58519,84 @@ func (p userWithPrismaLastLoginEqualsUniqueParam) lastLoginField() {}
 func (userWithPrismaLastLoginEqualsUniqueParam) unique() {}
 func (userWithPrismaLastLoginEqualsUniqueParam) equals() {}
 
+type UserWithPrismaBalanceEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	balanceField()
+}
+
+type UserWithPrismaBalanceSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	balanceField()
+}
+
+type userWithPrismaBalanceSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaBalanceSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaBalanceSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaBalanceSetParam) userModel() {}
+
+func (p userWithPrismaBalanceSetParam) balanceField() {}
+
+type UserWithPrismaBalanceWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	balanceField()
+}
+
+type userWithPrismaBalanceEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaBalanceEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaBalanceEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaBalanceEqualsParam) userModel() {}
+
+func (p userWithPrismaBalanceEqualsParam) balanceField() {}
+
+func (userWithPrismaBalanceSetParam) settable()  {}
+func (userWithPrismaBalanceEqualsParam) equals() {}
+
+type userWithPrismaBalanceEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaBalanceEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaBalanceEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaBalanceEqualsUniqueParam) userModel()    {}
+func (p userWithPrismaBalanceEqualsUniqueParam) balanceField() {}
+
+func (userWithPrismaBalanceEqualsUniqueParam) unique() {}
+func (userWithPrismaBalanceEqualsUniqueParam) equals() {}
+
 type UserWithPrismaCreatedAtEqualsSetParam interface {
 	field() builder.Field
 	getQuery() builder.Query
@@ -51266,6 +59142,162 @@ func (p userWithPrismaInternalOrdersEqualsUniqueParam) internalOrdersField() {}
 
 func (userWithPrismaInternalOrdersEqualsUniqueParam) unique() {}
 func (userWithPrismaInternalOrdersEqualsUniqueParam) equals() {}
+
+type UserWithPrismaTopupsEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	topupsField()
+}
+
+type UserWithPrismaTopupsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	topupsField()
+}
+
+type userWithPrismaTopupsSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTopupsSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTopupsSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTopupsSetParam) userModel() {}
+
+func (p userWithPrismaTopupsSetParam) topupsField() {}
+
+type UserWithPrismaTopupsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	topupsField()
+}
+
+type userWithPrismaTopupsEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTopupsEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTopupsEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTopupsEqualsParam) userModel() {}
+
+func (p userWithPrismaTopupsEqualsParam) topupsField() {}
+
+func (userWithPrismaTopupsSetParam) settable()  {}
+func (userWithPrismaTopupsEqualsParam) equals() {}
+
+type userWithPrismaTopupsEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaTopupsEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaTopupsEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaTopupsEqualsUniqueParam) userModel()   {}
+func (p userWithPrismaTopupsEqualsUniqueParam) topupsField() {}
+
+func (userWithPrismaTopupsEqualsUniqueParam) unique() {}
+func (userWithPrismaTopupsEqualsUniqueParam) equals() {}
+
+type UserWithPrismaMutationsEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	userModel()
+	mutationsField()
+}
+
+type UserWithPrismaMutationsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	mutationsField()
+}
+
+type userWithPrismaMutationsSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaMutationsSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaMutationsSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaMutationsSetParam) userModel() {}
+
+func (p userWithPrismaMutationsSetParam) mutationsField() {}
+
+type UserWithPrismaMutationsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	userModel()
+	mutationsField()
+}
+
+type userWithPrismaMutationsEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaMutationsEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaMutationsEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaMutationsEqualsParam) userModel() {}
+
+func (p userWithPrismaMutationsEqualsParam) mutationsField() {}
+
+func (userWithPrismaMutationsSetParam) settable()  {}
+func (userWithPrismaMutationsEqualsParam) equals() {}
+
+type userWithPrismaMutationsEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p userWithPrismaMutationsEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p userWithPrismaMutationsEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p userWithPrismaMutationsEqualsUniqueParam) userModel()      {}
+func (p userWithPrismaMutationsEqualsUniqueParam) mutationsField() {}
+
+func (userWithPrismaMutationsEqualsUniqueParam) unique() {}
+func (userWithPrismaMutationsEqualsUniqueParam) equals() {}
 
 type refreshTokenActions struct {
 	// client holds the prisma client
@@ -52886,6 +60918,7 @@ var supplierOutput = []builder.Output{
 	{Name: "code"},
 	{Name: "type"},
 	{Name: "base_url"},
+	{Name: "webhook_inbound"},
 	{Name: "status"},
 	{Name: "created_at"},
 	{Name: "updated_at"},
@@ -53600,6 +61633,84 @@ func (p supplierWithPrismaBaseURLEqualsUniqueParam) baseURLField()  {}
 
 func (supplierWithPrismaBaseURLEqualsUniqueParam) unique() {}
 func (supplierWithPrismaBaseURLEqualsUniqueParam) equals() {}
+
+type SupplierWithPrismaWebhookInboundEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	supplierModel()
+	webhookInboundField()
+}
+
+type SupplierWithPrismaWebhookInboundSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	webhookInboundField()
+}
+
+type supplierWithPrismaWebhookInboundSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaWebhookInboundSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaWebhookInboundSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaWebhookInboundSetParam) supplierModel() {}
+
+func (p supplierWithPrismaWebhookInboundSetParam) webhookInboundField() {}
+
+type SupplierWithPrismaWebhookInboundWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	supplierModel()
+	webhookInboundField()
+}
+
+type supplierWithPrismaWebhookInboundEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsParam) supplierModel() {}
+
+func (p supplierWithPrismaWebhookInboundEqualsParam) webhookInboundField() {}
+
+func (supplierWithPrismaWebhookInboundSetParam) settable()  {}
+func (supplierWithPrismaWebhookInboundEqualsParam) equals() {}
+
+type supplierWithPrismaWebhookInboundEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p supplierWithPrismaWebhookInboundEqualsUniqueParam) supplierModel()       {}
+func (p supplierWithPrismaWebhookInboundEqualsUniqueParam) webhookInboundField() {}
+
+func (supplierWithPrismaWebhookInboundEqualsUniqueParam) unique() {}
+func (supplierWithPrismaWebhookInboundEqualsUniqueParam) equals() {}
 
 type SupplierWithPrismaStatusEqualsSetParam interface {
 	field() builder.Field
@@ -64152,6 +72263,1770 @@ func (p paymentTypeWithPrismaOrdersEqualsUniqueParam) ordersField()      {}
 func (paymentTypeWithPrismaOrdersEqualsUniqueParam) unique() {}
 func (paymentTypeWithPrismaOrdersEqualsUniqueParam) equals() {}
 
+type topUpActions struct {
+	// client holds the prisma client
+	client *PrismaClient
+}
+
+var topUpOutput = []builder.Output{
+	{Name: "id"},
+	{Name: "user_id"},
+	{Name: "amount"},
+	{Name: "payment_method"},
+	{Name: "status"},
+	{Name: "created_at"},
+	{Name: "updated_at"},
+}
+
+type TopUpRelationWith interface {
+	getQuery() builder.Query
+	with()
+	topUpRelation()
+}
+
+type TopUpWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+}
+
+type topUpDefaultParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpDefaultParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpDefaultParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpDefaultParam) topUpModel() {}
+
+type TopUpOrderByParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+}
+
+type topUpOrderByParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpOrderByParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpOrderByParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpOrderByParam) topUpModel() {}
+
+type TopUpCursorParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	isCursor()
+}
+
+type topUpCursorParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpCursorParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpCursorParam) isCursor() {}
+
+func (p topUpCursorParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpCursorParam) topUpModel() {}
+
+type TopUpParamUnique interface {
+	field() builder.Field
+	getQuery() builder.Query
+	unique()
+	topUpModel()
+}
+
+type topUpParamUnique struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpParamUnique) topUpModel() {}
+
+func (topUpParamUnique) unique() {}
+
+func (p topUpParamUnique) field() builder.Field {
+	return p.data
+}
+
+func (p topUpParamUnique) getQuery() builder.Query {
+	return p.query
+}
+
+type TopUpEqualsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+}
+
+type topUpEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpEqualsParam) topUpModel() {}
+
+func (topUpEqualsParam) equals() {}
+
+func (p topUpEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+type TopUpEqualsUniqueWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	unique()
+	topUpModel()
+}
+
+type topUpEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpEqualsUniqueParam) topUpModel() {}
+
+func (topUpEqualsUniqueParam) unique() {}
+func (topUpEqualsUniqueParam) equals() {}
+
+func (p topUpEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+type TopUpSetParam interface {
+	field() builder.Field
+	settable()
+	topUpModel()
+}
+
+type topUpSetParam struct {
+	data builder.Field
+}
+
+func (topUpSetParam) settable() {}
+
+func (p topUpSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpSetParam) topUpModel() {}
+
+type TopUpWithPrismaIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	idField()
+}
+
+type TopUpWithPrismaIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	idField()
+}
+
+type topUpWithPrismaIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaIDSetParam) topUpModel() {}
+
+func (p topUpWithPrismaIDSetParam) idField() {}
+
+type TopUpWithPrismaIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	idField()
+}
+
+type topUpWithPrismaIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaIDEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaIDEqualsParam) idField() {}
+
+func (topUpWithPrismaIDSetParam) settable()  {}
+func (topUpWithPrismaIDEqualsParam) equals() {}
+
+type topUpWithPrismaIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaIDEqualsUniqueParam) topUpModel() {}
+func (p topUpWithPrismaIDEqualsUniqueParam) idField()    {}
+
+func (topUpWithPrismaIDEqualsUniqueParam) unique() {}
+func (topUpWithPrismaIDEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaUserIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	userIDField()
+}
+
+type TopUpWithPrismaUserIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	userIDField()
+}
+
+type topUpWithPrismaUserIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserIDSetParam) topUpModel() {}
+
+func (p topUpWithPrismaUserIDSetParam) userIDField() {}
+
+type TopUpWithPrismaUserIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	userIDField()
+}
+
+type topUpWithPrismaUserIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserIDEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaUserIDEqualsParam) userIDField() {}
+
+func (topUpWithPrismaUserIDSetParam) settable()  {}
+func (topUpWithPrismaUserIDEqualsParam) equals() {}
+
+type topUpWithPrismaUserIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserIDEqualsUniqueParam) topUpModel()  {}
+func (p topUpWithPrismaUserIDEqualsUniqueParam) userIDField() {}
+
+func (topUpWithPrismaUserIDEqualsUniqueParam) unique() {}
+func (topUpWithPrismaUserIDEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaAmountEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	amountField()
+}
+
+type TopUpWithPrismaAmountSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	amountField()
+}
+
+type topUpWithPrismaAmountSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaAmountSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaAmountSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaAmountSetParam) topUpModel() {}
+
+func (p topUpWithPrismaAmountSetParam) amountField() {}
+
+type TopUpWithPrismaAmountWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	amountField()
+}
+
+type topUpWithPrismaAmountEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaAmountEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaAmountEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaAmountEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaAmountEqualsParam) amountField() {}
+
+func (topUpWithPrismaAmountSetParam) settable()  {}
+func (topUpWithPrismaAmountEqualsParam) equals() {}
+
+type topUpWithPrismaAmountEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaAmountEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaAmountEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaAmountEqualsUniqueParam) topUpModel()  {}
+func (p topUpWithPrismaAmountEqualsUniqueParam) amountField() {}
+
+func (topUpWithPrismaAmountEqualsUniqueParam) unique() {}
+func (topUpWithPrismaAmountEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaPaymentMethodEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	paymentMethodField()
+}
+
+type TopUpWithPrismaPaymentMethodSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	paymentMethodField()
+}
+
+type topUpWithPrismaPaymentMethodSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaPaymentMethodSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaPaymentMethodSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaPaymentMethodSetParam) topUpModel() {}
+
+func (p topUpWithPrismaPaymentMethodSetParam) paymentMethodField() {}
+
+type TopUpWithPrismaPaymentMethodWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	paymentMethodField()
+}
+
+type topUpWithPrismaPaymentMethodEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaPaymentMethodEqualsParam) paymentMethodField() {}
+
+func (topUpWithPrismaPaymentMethodSetParam) settable()  {}
+func (topUpWithPrismaPaymentMethodEqualsParam) equals() {}
+
+type topUpWithPrismaPaymentMethodEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaPaymentMethodEqualsUniqueParam) topUpModel()         {}
+func (p topUpWithPrismaPaymentMethodEqualsUniqueParam) paymentMethodField() {}
+
+func (topUpWithPrismaPaymentMethodEqualsUniqueParam) unique() {}
+func (topUpWithPrismaPaymentMethodEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaStatusEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	statusField()
+}
+
+type TopUpWithPrismaStatusSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	statusField()
+}
+
+type topUpWithPrismaStatusSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaStatusSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaStatusSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaStatusSetParam) topUpModel() {}
+
+func (p topUpWithPrismaStatusSetParam) statusField() {}
+
+type TopUpWithPrismaStatusWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	statusField()
+}
+
+type topUpWithPrismaStatusEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaStatusEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaStatusEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaStatusEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaStatusEqualsParam) statusField() {}
+
+func (topUpWithPrismaStatusSetParam) settable()  {}
+func (topUpWithPrismaStatusEqualsParam) equals() {}
+
+type topUpWithPrismaStatusEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaStatusEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaStatusEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaStatusEqualsUniqueParam) topUpModel()  {}
+func (p topUpWithPrismaStatusEqualsUniqueParam) statusField() {}
+
+func (topUpWithPrismaStatusEqualsUniqueParam) unique() {}
+func (topUpWithPrismaStatusEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaCreatedAtEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	createdAtField()
+}
+
+type TopUpWithPrismaCreatedAtSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	createdAtField()
+}
+
+type topUpWithPrismaCreatedAtSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaCreatedAtSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaCreatedAtSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaCreatedAtSetParam) topUpModel() {}
+
+func (p topUpWithPrismaCreatedAtSetParam) createdAtField() {}
+
+type TopUpWithPrismaCreatedAtWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	createdAtField()
+}
+
+type topUpWithPrismaCreatedAtEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaCreatedAtEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaCreatedAtEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaCreatedAtEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaCreatedAtEqualsParam) createdAtField() {}
+
+func (topUpWithPrismaCreatedAtSetParam) settable()  {}
+func (topUpWithPrismaCreatedAtEqualsParam) equals() {}
+
+type topUpWithPrismaCreatedAtEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaCreatedAtEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaCreatedAtEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaCreatedAtEqualsUniqueParam) topUpModel()     {}
+func (p topUpWithPrismaCreatedAtEqualsUniqueParam) createdAtField() {}
+
+func (topUpWithPrismaCreatedAtEqualsUniqueParam) unique() {}
+func (topUpWithPrismaCreatedAtEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaUpdatedAtEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	updatedAtField()
+}
+
+type TopUpWithPrismaUpdatedAtSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	updatedAtField()
+}
+
+type topUpWithPrismaUpdatedAtSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUpdatedAtSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUpdatedAtSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUpdatedAtSetParam) topUpModel() {}
+
+func (p topUpWithPrismaUpdatedAtSetParam) updatedAtField() {}
+
+type TopUpWithPrismaUpdatedAtWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	updatedAtField()
+}
+
+type topUpWithPrismaUpdatedAtEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaUpdatedAtEqualsParam) updatedAtField() {}
+
+func (topUpWithPrismaUpdatedAtSetParam) settable()  {}
+func (topUpWithPrismaUpdatedAtEqualsParam) equals() {}
+
+type topUpWithPrismaUpdatedAtEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUpdatedAtEqualsUniqueParam) topUpModel()     {}
+func (p topUpWithPrismaUpdatedAtEqualsUniqueParam) updatedAtField() {}
+
+func (topUpWithPrismaUpdatedAtEqualsUniqueParam) unique() {}
+func (topUpWithPrismaUpdatedAtEqualsUniqueParam) equals() {}
+
+type TopUpWithPrismaUserEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	topUpModel()
+	userField()
+}
+
+type TopUpWithPrismaUserSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	userField()
+}
+
+type topUpWithPrismaUserSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserSetParam) topUpModel() {}
+
+func (p topUpWithPrismaUserSetParam) userField() {}
+
+type TopUpWithPrismaUserWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	topUpModel()
+	userField()
+}
+
+type topUpWithPrismaUserEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserEqualsParam) topUpModel() {}
+
+func (p topUpWithPrismaUserEqualsParam) userField() {}
+
+func (topUpWithPrismaUserSetParam) settable()  {}
+func (topUpWithPrismaUserEqualsParam) equals() {}
+
+type topUpWithPrismaUserEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p topUpWithPrismaUserEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p topUpWithPrismaUserEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpWithPrismaUserEqualsUniqueParam) topUpModel() {}
+func (p topUpWithPrismaUserEqualsUniqueParam) userField()  {}
+
+func (topUpWithPrismaUserEqualsUniqueParam) unique() {}
+func (topUpWithPrismaUserEqualsUniqueParam) equals() {}
+
+type walletMutationActions struct {
+	// client holds the prisma client
+	client *PrismaClient
+}
+
+var walletMutationOutput = []builder.Output{
+	{Name: "id"},
+	{Name: "user_id"},
+	{Name: "type"},
+	{Name: "amount"},
+	{Name: "balance_before"},
+	{Name: "balance_after"},
+	{Name: "description"},
+	{Name: "reference_id"},
+	{Name: "created_at"},
+}
+
+type WalletMutationRelationWith interface {
+	getQuery() builder.Query
+	with()
+	walletMutationRelation()
+}
+
+type WalletMutationWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+}
+
+type walletMutationDefaultParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationDefaultParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationDefaultParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationDefaultParam) walletMutationModel() {}
+
+type WalletMutationOrderByParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+}
+
+type walletMutationOrderByParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationOrderByParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationOrderByParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationOrderByParam) walletMutationModel() {}
+
+type WalletMutationCursorParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	isCursor()
+}
+
+type walletMutationCursorParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationCursorParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationCursorParam) isCursor() {}
+
+func (p walletMutationCursorParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationCursorParam) walletMutationModel() {}
+
+type WalletMutationParamUnique interface {
+	field() builder.Field
+	getQuery() builder.Query
+	unique()
+	walletMutationModel()
+}
+
+type walletMutationParamUnique struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationParamUnique) walletMutationModel() {}
+
+func (walletMutationParamUnique) unique() {}
+
+func (p walletMutationParamUnique) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationParamUnique) getQuery() builder.Query {
+	return p.query
+}
+
+type WalletMutationEqualsWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+}
+
+type walletMutationEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationEqualsParam) walletMutationModel() {}
+
+func (walletMutationEqualsParam) equals() {}
+
+func (p walletMutationEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+type WalletMutationEqualsUniqueWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	unique()
+	walletMutationModel()
+}
+
+type walletMutationEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationEqualsUniqueParam) walletMutationModel() {}
+
+func (walletMutationEqualsUniqueParam) unique() {}
+func (walletMutationEqualsUniqueParam) equals() {}
+
+func (p walletMutationEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+type WalletMutationSetParam interface {
+	field() builder.Field
+	settable()
+	walletMutationModel()
+}
+
+type walletMutationSetParam struct {
+	data builder.Field
+}
+
+func (walletMutationSetParam) settable() {}
+
+func (p walletMutationSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationSetParam) walletMutationModel() {}
+
+type WalletMutationWithPrismaIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	idField()
+}
+
+type WalletMutationWithPrismaIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	idField()
+}
+
+type walletMutationWithPrismaIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaIDSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaIDSetParam) idField() {}
+
+type WalletMutationWithPrismaIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	idField()
+}
+
+type walletMutationWithPrismaIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaIDEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaIDEqualsParam) idField() {}
+
+func (walletMutationWithPrismaIDSetParam) settable()  {}
+func (walletMutationWithPrismaIDEqualsParam) equals() {}
+
+type walletMutationWithPrismaIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaIDEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaIDEqualsUniqueParam) idField()             {}
+
+func (walletMutationWithPrismaIDEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaIDEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaUserIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	userIDField()
+}
+
+type WalletMutationWithPrismaUserIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	userIDField()
+}
+
+type walletMutationWithPrismaUserIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserIDSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaUserIDSetParam) userIDField() {}
+
+type WalletMutationWithPrismaUserIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	userIDField()
+}
+
+type walletMutationWithPrismaUserIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserIDEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaUserIDEqualsParam) userIDField() {}
+
+func (walletMutationWithPrismaUserIDSetParam) settable()  {}
+func (walletMutationWithPrismaUserIDEqualsParam) equals() {}
+
+type walletMutationWithPrismaUserIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserIDEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaUserIDEqualsUniqueParam) userIDField()         {}
+
+func (walletMutationWithPrismaUserIDEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaUserIDEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaTypeEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	typeField()
+}
+
+type WalletMutationWithPrismaTypeSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	typeField()
+}
+
+type walletMutationWithPrismaTypeSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaTypeSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaTypeSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaTypeSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaTypeSetParam) typeField() {}
+
+type WalletMutationWithPrismaTypeWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	typeField()
+}
+
+type walletMutationWithPrismaTypeEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaTypeEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaTypeEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaTypeEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaTypeEqualsParam) typeField() {}
+
+func (walletMutationWithPrismaTypeSetParam) settable()  {}
+func (walletMutationWithPrismaTypeEqualsParam) equals() {}
+
+type walletMutationWithPrismaTypeEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaTypeEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaTypeEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaTypeEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaTypeEqualsUniqueParam) typeField()           {}
+
+func (walletMutationWithPrismaTypeEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaTypeEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaAmountEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	amountField()
+}
+
+type WalletMutationWithPrismaAmountSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	amountField()
+}
+
+type walletMutationWithPrismaAmountSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaAmountSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaAmountSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaAmountSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaAmountSetParam) amountField() {}
+
+type WalletMutationWithPrismaAmountWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	amountField()
+}
+
+type walletMutationWithPrismaAmountEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaAmountEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaAmountEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaAmountEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaAmountEqualsParam) amountField() {}
+
+func (walletMutationWithPrismaAmountSetParam) settable()  {}
+func (walletMutationWithPrismaAmountEqualsParam) equals() {}
+
+type walletMutationWithPrismaAmountEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaAmountEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaAmountEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaAmountEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaAmountEqualsUniqueParam) amountField()         {}
+
+func (walletMutationWithPrismaAmountEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaAmountEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaBalanceBeforeEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	balanceBeforeField()
+}
+
+type WalletMutationWithPrismaBalanceBeforeSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	balanceBeforeField()
+}
+
+type walletMutationWithPrismaBalanceBeforeSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceBeforeSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaBalanceBeforeSetParam) balanceBeforeField() {}
+
+type WalletMutationWithPrismaBalanceBeforeWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	balanceBeforeField()
+}
+
+type walletMutationWithPrismaBalanceBeforeEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsParam) balanceBeforeField() {}
+
+func (walletMutationWithPrismaBalanceBeforeSetParam) settable()  {}
+func (walletMutationWithPrismaBalanceBeforeEqualsParam) equals() {}
+
+type walletMutationWithPrismaBalanceBeforeEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) balanceBeforeField()  {}
+
+func (walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaBalanceBeforeEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaBalanceAfterEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	balanceAfterField()
+}
+
+type WalletMutationWithPrismaBalanceAfterSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	balanceAfterField()
+}
+
+type walletMutationWithPrismaBalanceAfterSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceAfterSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceAfterSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceAfterSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaBalanceAfterSetParam) balanceAfterField() {}
+
+type WalletMutationWithPrismaBalanceAfterWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	balanceAfterField()
+}
+
+type walletMutationWithPrismaBalanceAfterEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsParam) balanceAfterField() {}
+
+func (walletMutationWithPrismaBalanceAfterSetParam) settable()  {}
+func (walletMutationWithPrismaBalanceAfterEqualsParam) equals() {}
+
+type walletMutationWithPrismaBalanceAfterEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaBalanceAfterEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaBalanceAfterEqualsUniqueParam) balanceAfterField()   {}
+
+func (walletMutationWithPrismaBalanceAfterEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaBalanceAfterEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaDescriptionEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	descriptionField()
+}
+
+type WalletMutationWithPrismaDescriptionSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	descriptionField()
+}
+
+type walletMutationWithPrismaDescriptionSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaDescriptionSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaDescriptionSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaDescriptionSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaDescriptionSetParam) descriptionField() {}
+
+type WalletMutationWithPrismaDescriptionWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	descriptionField()
+}
+
+type walletMutationWithPrismaDescriptionEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaDescriptionEqualsParam) descriptionField() {}
+
+func (walletMutationWithPrismaDescriptionSetParam) settable()  {}
+func (walletMutationWithPrismaDescriptionEqualsParam) equals() {}
+
+type walletMutationWithPrismaDescriptionEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaDescriptionEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaDescriptionEqualsUniqueParam) descriptionField()    {}
+
+func (walletMutationWithPrismaDescriptionEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaDescriptionEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaReferenceIDEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	referenceIDField()
+}
+
+type WalletMutationWithPrismaReferenceIDSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	referenceIDField()
+}
+
+type walletMutationWithPrismaReferenceIDSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaReferenceIDSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaReferenceIDSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaReferenceIDSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaReferenceIDSetParam) referenceIDField() {}
+
+type WalletMutationWithPrismaReferenceIDWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	referenceIDField()
+}
+
+type walletMutationWithPrismaReferenceIDEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaReferenceIDEqualsParam) referenceIDField() {}
+
+func (walletMutationWithPrismaReferenceIDSetParam) settable()  {}
+func (walletMutationWithPrismaReferenceIDEqualsParam) equals() {}
+
+type walletMutationWithPrismaReferenceIDEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaReferenceIDEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaReferenceIDEqualsUniqueParam) referenceIDField()    {}
+
+func (walletMutationWithPrismaReferenceIDEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaReferenceIDEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaCreatedAtEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	createdAtField()
+}
+
+type WalletMutationWithPrismaCreatedAtSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	createdAtField()
+}
+
+type walletMutationWithPrismaCreatedAtSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaCreatedAtSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaCreatedAtSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaCreatedAtSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaCreatedAtSetParam) createdAtField() {}
+
+type WalletMutationWithPrismaCreatedAtWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	createdAtField()
+}
+
+type walletMutationWithPrismaCreatedAtEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaCreatedAtEqualsParam) createdAtField() {}
+
+func (walletMutationWithPrismaCreatedAtSetParam) settable()  {}
+func (walletMutationWithPrismaCreatedAtEqualsParam) equals() {}
+
+type walletMutationWithPrismaCreatedAtEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaCreatedAtEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaCreatedAtEqualsUniqueParam) createdAtField()      {}
+
+func (walletMutationWithPrismaCreatedAtEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaCreatedAtEqualsUniqueParam) equals() {}
+
+type WalletMutationWithPrismaUserEqualsSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	equals()
+	walletMutationModel()
+	userField()
+}
+
+type WalletMutationWithPrismaUserSetParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	userField()
+}
+
+type walletMutationWithPrismaUserSetParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserSetParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserSetParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserSetParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaUserSetParam) userField() {}
+
+type WalletMutationWithPrismaUserWhereParam interface {
+	field() builder.Field
+	getQuery() builder.Query
+	walletMutationModel()
+	userField()
+}
+
+type walletMutationWithPrismaUserEqualsParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserEqualsParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserEqualsParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserEqualsParam) walletMutationModel() {}
+
+func (p walletMutationWithPrismaUserEqualsParam) userField() {}
+
+func (walletMutationWithPrismaUserSetParam) settable()  {}
+func (walletMutationWithPrismaUserEqualsParam) equals() {}
+
+type walletMutationWithPrismaUserEqualsUniqueParam struct {
+	data  builder.Field
+	query builder.Query
+}
+
+func (p walletMutationWithPrismaUserEqualsUniqueParam) field() builder.Field {
+	return p.data
+}
+
+func (p walletMutationWithPrismaUserEqualsUniqueParam) getQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationWithPrismaUserEqualsUniqueParam) walletMutationModel() {}
+func (p walletMutationWithPrismaUserEqualsUniqueParam) userField()           {}
+
+func (walletMutationWithPrismaUserEqualsUniqueParam) unique() {}
+func (walletMutationWithPrismaUserEqualsUniqueParam) equals() {}
+
 // --- template create.gotpl ---
 
 // Creates a single user.
@@ -65227,6 +75102,154 @@ func (r paymentTypeCreateOne) Exec(ctx context.Context) (*PaymentTypeModel, erro
 
 func (r paymentTypeCreateOne) Tx() PaymentTypeUniqueTxResult {
 	v := newPaymentTypeUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+// Creates a single topUp.
+func (r topUpActions) CreateOne(
+	_amount TopUpWithPrismaAmountSetParam,
+	_user TopUpWithPrismaUserSetParam,
+
+	optional ...TopUpSetParam,
+) topUpCreateOne {
+	var v topUpCreateOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "createOne"
+	v.query.Model = "TopUp"
+	v.query.Outputs = topUpOutput
+
+	var fields []builder.Field
+
+	fields = append(fields, _amount.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+func (r topUpCreateOne) With(params ...TopUpRelationWith) topUpCreateOne {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+type topUpCreateOne struct {
+	query builder.Query
+}
+
+func (p topUpCreateOne) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p topUpCreateOne) topUpModel() {}
+
+func (r topUpCreateOne) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpCreateOne) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+// Creates a single walletMutation.
+func (r walletMutationActions) CreateOne(
+	_type WalletMutationWithPrismaTypeSetParam,
+	_amount WalletMutationWithPrismaAmountSetParam,
+	_balanceBefore WalletMutationWithPrismaBalanceBeforeSetParam,
+	_balanceAfter WalletMutationWithPrismaBalanceAfterSetParam,
+	_description WalletMutationWithPrismaDescriptionSetParam,
+	_user WalletMutationWithPrismaUserSetParam,
+
+	optional ...WalletMutationSetParam,
+) walletMutationCreateOne {
+	var v walletMutationCreateOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "createOne"
+	v.query.Model = "WalletMutation"
+	v.query.Outputs = walletMutationOutput
+
+	var fields []builder.Field
+
+	fields = append(fields, _type.field())
+	fields = append(fields, _amount.field())
+	fields = append(fields, _balanceBefore.field())
+	fields = append(fields, _balanceAfter.field())
+	fields = append(fields, _description.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+func (r walletMutationCreateOne) With(params ...WalletMutationRelationWith) walletMutationCreateOne {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+type walletMutationCreateOne struct {
+	query builder.Query
+}
+
+func (p walletMutationCreateOne) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p walletMutationCreateOne) walletMutationModel() {}
+
+func (r walletMutationCreateOne) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationCreateOne) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
 	return v
@@ -67444,6 +77467,1114 @@ func (r userToInternalOrdersDeleteMany) Exec(ctx context.Context) (*BatchResult,
 }
 
 func (r userToInternalOrdersDeleteMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToTopupsFindUnique struct {
+	query builder.Query
+}
+
+func (r userToTopupsFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindUnique) with()         {}
+func (r userToTopupsFindUnique) userModel()    {}
+func (r userToTopupsFindUnique) userRelation() {}
+
+func (r userToTopupsFindUnique) With(params ...TopUpRelationWith) userToTopupsFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToTopupsFindUnique) Select(params ...userPrismaFields) userToTopupsFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindUnique) Omit(params ...userPrismaFields) userToTopupsFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindUnique) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToTopupsFindUnique) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToTopupsFindUnique) Update(params ...UserSetParam) userToTopupsUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "User"
+
+	var v userToTopupsUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToTopupsUpdateUnique struct {
+	query builder.Query
+}
+
+func (r userToTopupsUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsUpdateUnique) userModel() {}
+
+func (r userToTopupsUpdateUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToTopupsUpdateUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToTopupsFindUnique) Delete() userToTopupsDeleteUnique {
+	var v userToTopupsDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "User"
+
+	return v
+}
+
+type userToTopupsDeleteUnique struct {
+	query builder.Query
+}
+
+func (r userToTopupsDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToTopupsDeleteUnique) userModel() {}
+
+func (r userToTopupsDeleteUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToTopupsDeleteUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToTopupsFindFirst struct {
+	query builder.Query
+}
+
+func (r userToTopupsFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindFirst) with()         {}
+func (r userToTopupsFindFirst) userModel()    {}
+func (r userToTopupsFindFirst) userRelation() {}
+
+func (r userToTopupsFindFirst) With(params ...TopUpRelationWith) userToTopupsFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToTopupsFindFirst) Select(params ...userPrismaFields) userToTopupsFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindFirst) Omit(params ...userPrismaFields) userToTopupsFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindFirst) OrderBy(params ...TopUpOrderByParam) userToTopupsFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToTopupsFindFirst) Skip(count int) userToTopupsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToTopupsFindFirst) Take(count int) userToTopupsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToTopupsFindFirst) Cursor(cursor UserCursorParam) userToTopupsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToTopupsFindFirst) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToTopupsFindFirst) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type userToTopupsFindMany struct {
+	query builder.Query
+}
+
+func (r userToTopupsFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsFindMany) with()         {}
+func (r userToTopupsFindMany) userModel()    {}
+func (r userToTopupsFindMany) userRelation() {}
+
+func (r userToTopupsFindMany) With(params ...TopUpRelationWith) userToTopupsFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToTopupsFindMany) Select(params ...userPrismaFields) userToTopupsFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindMany) Omit(params ...userPrismaFields) userToTopupsFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToTopupsFindMany) OrderBy(params ...TopUpOrderByParam) userToTopupsFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToTopupsFindMany) Skip(count int) userToTopupsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToTopupsFindMany) Take(count int) userToTopupsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToTopupsFindMany) Cursor(cursor UserCursorParam) userToTopupsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToTopupsFindMany) Exec(ctx context.Context) (
+	[]UserModel,
+	error,
+) {
+	var v []UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToTopupsFindMany) ExecInner(ctx context.Context) (
+	[]InnerUser,
+	error,
+) {
+	var v []InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToTopupsFindMany) Update(params ...UserSetParam) userToTopupsUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "User"
+
+	r.query.Outputs = countOutput
+
+	var v userToTopupsUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToTopupsUpdateMany struct {
+	query builder.Query
+}
+
+func (r userToTopupsUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToTopupsUpdateMany) userModel() {}
+
+func (r userToTopupsUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToTopupsUpdateMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToTopupsFindMany) Delete() userToTopupsDeleteMany {
+	var v userToTopupsDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "User"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type userToTopupsDeleteMany struct {
+	query builder.Query
+}
+
+func (r userToTopupsDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToTopupsDeleteMany) userModel() {}
+
+func (r userToTopupsDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToTopupsDeleteMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToMutationsFindUnique struct {
+	query builder.Query
+}
+
+func (r userToMutationsFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindUnique) with()         {}
+func (r userToMutationsFindUnique) userModel()    {}
+func (r userToMutationsFindUnique) userRelation() {}
+
+func (r userToMutationsFindUnique) With(params ...WalletMutationRelationWith) userToMutationsFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToMutationsFindUnique) Select(params ...userPrismaFields) userToMutationsFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindUnique) Omit(params ...userPrismaFields) userToMutationsFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindUnique) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToMutationsFindUnique) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToMutationsFindUnique) Update(params ...UserSetParam) userToMutationsUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "User"
+
+	var v userToMutationsUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToMutationsUpdateUnique struct {
+	query builder.Query
+}
+
+func (r userToMutationsUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsUpdateUnique) userModel() {}
+
+func (r userToMutationsUpdateUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToMutationsUpdateUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToMutationsFindUnique) Delete() userToMutationsDeleteUnique {
+	var v userToMutationsDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "User"
+
+	return v
+}
+
+type userToMutationsDeleteUnique struct {
+	query builder.Query
+}
+
+func (r userToMutationsDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToMutationsDeleteUnique) userModel() {}
+
+func (r userToMutationsDeleteUnique) Exec(ctx context.Context) (*UserModel, error) {
+	var v UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToMutationsDeleteUnique) Tx() UserUniqueTxResult {
+	v := newUserUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type userToMutationsFindFirst struct {
+	query builder.Query
+}
+
+func (r userToMutationsFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindFirst) with()         {}
+func (r userToMutationsFindFirst) userModel()    {}
+func (r userToMutationsFindFirst) userRelation() {}
+
+func (r userToMutationsFindFirst) With(params ...WalletMutationRelationWith) userToMutationsFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToMutationsFindFirst) Select(params ...userPrismaFields) userToMutationsFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindFirst) Omit(params ...userPrismaFields) userToMutationsFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindFirst) OrderBy(params ...WalletMutationOrderByParam) userToMutationsFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToMutationsFindFirst) Skip(count int) userToMutationsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToMutationsFindFirst) Take(count int) userToMutationsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToMutationsFindFirst) Cursor(cursor UserCursorParam) userToMutationsFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToMutationsFindFirst) Exec(ctx context.Context) (
+	*UserModel,
+	error,
+) {
+	var v *UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r userToMutationsFindFirst) ExecInner(ctx context.Context) (
+	*InnerUser,
+	error,
+) {
+	var v *InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type userToMutationsFindMany struct {
+	query builder.Query
+}
+
+func (r userToMutationsFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsFindMany) with()         {}
+func (r userToMutationsFindMany) userModel()    {}
+func (r userToMutationsFindMany) userRelation() {}
+
+func (r userToMutationsFindMany) With(params ...WalletMutationRelationWith) userToMutationsFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r userToMutationsFindMany) Select(params ...userPrismaFields) userToMutationsFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindMany) Omit(params ...userPrismaFields) userToMutationsFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range userOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r userToMutationsFindMany) OrderBy(params ...WalletMutationOrderByParam) userToMutationsFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r userToMutationsFindMany) Skip(count int) userToMutationsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToMutationsFindMany) Take(count int) userToMutationsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r userToMutationsFindMany) Cursor(cursor UserCursorParam) userToMutationsFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r userToMutationsFindMany) Exec(ctx context.Context) (
+	[]UserModel,
+	error,
+) {
+	var v []UserModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToMutationsFindMany) ExecInner(ctx context.Context) (
+	[]InnerUser,
+	error,
+) {
+	var v []InnerUser
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r userToMutationsFindMany) Update(params ...UserSetParam) userToMutationsUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "User"
+
+	r.query.Outputs = countOutput
+
+	var v userToMutationsUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type userToMutationsUpdateMany struct {
+	query builder.Query
+}
+
+func (r userToMutationsUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r userToMutationsUpdateMany) userModel() {}
+
+func (r userToMutationsUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToMutationsUpdateMany) Tx() UserManyTxResult {
+	v := newUserManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r userToMutationsFindMany) Delete() userToMutationsDeleteMany {
+	var v userToMutationsDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "User"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type userToMutationsDeleteMany struct {
+	query builder.Query
+}
+
+func (r userToMutationsDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p userToMutationsDeleteMany) userModel() {}
+
+func (r userToMutationsDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r userToMutationsDeleteMany) Tx() UserManyTxResult {
 	v := newUserManyTxResult()
 	v.query = r.query
 	v.query.TxResult = make(chan []byte, 1)
@@ -93820,6 +104951,2414 @@ func (r paymentTypeDeleteMany) Tx() PaymentTypeManyTxResult {
 	return v
 }
 
+type topUpToUserFindUnique struct {
+	query builder.Query
+}
+
+func (r topUpToUserFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindUnique) with()          {}
+func (r topUpToUserFindUnique) topUpModel()    {}
+func (r topUpToUserFindUnique) topUpRelation() {}
+
+func (r topUpToUserFindUnique) With(params ...UserRelationWith) topUpToUserFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpToUserFindUnique) Select(params ...topUpPrismaFields) topUpToUserFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindUnique) Omit(params ...topUpPrismaFields) topUpToUserFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindUnique) Exec(ctx context.Context) (
+	*TopUpModel,
+	error,
+) {
+	var v *TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpToUserFindUnique) ExecInner(ctx context.Context) (
+	*InnerTopUp,
+	error,
+) {
+	var v *InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpToUserFindUnique) Update(params ...TopUpSetParam) topUpToUserUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "TopUp"
+
+	var v topUpToUserUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type topUpToUserUpdateUnique struct {
+	query builder.Query
+}
+
+func (r topUpToUserUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserUpdateUnique) topUpModel() {}
+
+func (r topUpToUserUpdateUnique) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpToUserUpdateUnique) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r topUpToUserFindUnique) Delete() topUpToUserDeleteUnique {
+	var v topUpToUserDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "TopUp"
+
+	return v
+}
+
+type topUpToUserDeleteUnique struct {
+	query builder.Query
+}
+
+func (r topUpToUserDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p topUpToUserDeleteUnique) topUpModel() {}
+
+func (r topUpToUserDeleteUnique) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpToUserDeleteUnique) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type topUpToUserFindFirst struct {
+	query builder.Query
+}
+
+func (r topUpToUserFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindFirst) with()          {}
+func (r topUpToUserFindFirst) topUpModel()    {}
+func (r topUpToUserFindFirst) topUpRelation() {}
+
+func (r topUpToUserFindFirst) With(params ...UserRelationWith) topUpToUserFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpToUserFindFirst) Select(params ...topUpPrismaFields) topUpToUserFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindFirst) Omit(params ...topUpPrismaFields) topUpToUserFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindFirst) OrderBy(params ...UserOrderByParam) topUpToUserFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r topUpToUserFindFirst) Skip(count int) topUpToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpToUserFindFirst) Take(count int) topUpToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpToUserFindFirst) Cursor(cursor TopUpCursorParam) topUpToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r topUpToUserFindFirst) Exec(ctx context.Context) (
+	*TopUpModel,
+	error,
+) {
+	var v *TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpToUserFindFirst) ExecInner(ctx context.Context) (
+	*InnerTopUp,
+	error,
+) {
+	var v *InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type topUpToUserFindMany struct {
+	query builder.Query
+}
+
+func (r topUpToUserFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserFindMany) with()          {}
+func (r topUpToUserFindMany) topUpModel()    {}
+func (r topUpToUserFindMany) topUpRelation() {}
+
+func (r topUpToUserFindMany) With(params ...UserRelationWith) topUpToUserFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpToUserFindMany) Select(params ...topUpPrismaFields) topUpToUserFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindMany) Omit(params ...topUpPrismaFields) topUpToUserFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpToUserFindMany) OrderBy(params ...UserOrderByParam) topUpToUserFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r topUpToUserFindMany) Skip(count int) topUpToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpToUserFindMany) Take(count int) topUpToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpToUserFindMany) Cursor(cursor TopUpCursorParam) topUpToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r topUpToUserFindMany) Exec(ctx context.Context) (
+	[]TopUpModel,
+	error,
+) {
+	var v []TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r topUpToUserFindMany) ExecInner(ctx context.Context) (
+	[]InnerTopUp,
+	error,
+) {
+	var v []InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r topUpToUserFindMany) Update(params ...TopUpSetParam) topUpToUserUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "TopUp"
+
+	r.query.Outputs = countOutput
+
+	var v topUpToUserUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type topUpToUserUpdateMany struct {
+	query builder.Query
+}
+
+func (r topUpToUserUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpToUserUpdateMany) topUpModel() {}
+
+func (r topUpToUserUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpToUserUpdateMany) Tx() TopUpManyTxResult {
+	v := newTopUpManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r topUpToUserFindMany) Delete() topUpToUserDeleteMany {
+	var v topUpToUserDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "TopUp"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type topUpToUserDeleteMany struct {
+	query builder.Query
+}
+
+func (r topUpToUserDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p topUpToUserDeleteMany) topUpModel() {}
+
+func (r topUpToUserDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpToUserDeleteMany) Tx() TopUpManyTxResult {
+	v := newTopUpManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type topUpFindUnique struct {
+	query builder.Query
+}
+
+func (r topUpFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindUnique) with()          {}
+func (r topUpFindUnique) topUpModel()    {}
+func (r topUpFindUnique) topUpRelation() {}
+
+func (r topUpActions) FindUnique(
+	params TopUpEqualsUniqueWhereParam,
+) topUpFindUnique {
+	var v topUpFindUnique
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findUnique"
+
+	v.query.Model = "TopUp"
+	v.query.Outputs = topUpOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r topUpFindUnique) With(params ...TopUpRelationWith) topUpFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpFindUnique) Select(params ...topUpPrismaFields) topUpFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindUnique) Omit(params ...topUpPrismaFields) topUpFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindUnique) Exec(ctx context.Context) (
+	*TopUpModel,
+	error,
+) {
+	var v *TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpFindUnique) ExecInner(ctx context.Context) (
+	*InnerTopUp,
+	error,
+) {
+	var v *InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpFindUnique) Update(params ...TopUpSetParam) topUpUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "TopUp"
+
+	var v topUpUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type topUpUpdateUnique struct {
+	query builder.Query
+}
+
+func (r topUpUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpUpdateUnique) topUpModel() {}
+
+func (r topUpUpdateUnique) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpUpdateUnique) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r topUpFindUnique) Delete() topUpDeleteUnique {
+	var v topUpDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "TopUp"
+
+	return v
+}
+
+type topUpDeleteUnique struct {
+	query builder.Query
+}
+
+func (r topUpDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p topUpDeleteUnique) topUpModel() {}
+
+func (r topUpDeleteUnique) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpDeleteUnique) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type topUpFindFirst struct {
+	query builder.Query
+}
+
+func (r topUpFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindFirst) with()          {}
+func (r topUpFindFirst) topUpModel()    {}
+func (r topUpFindFirst) topUpRelation() {}
+
+func (r topUpActions) FindFirst(
+	params ...TopUpWhereParam,
+) topUpFindFirst {
+	var v topUpFindFirst
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findFirst"
+
+	v.query.Model = "TopUp"
+	v.query.Outputs = topUpOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r topUpFindFirst) With(params ...TopUpRelationWith) topUpFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpFindFirst) Select(params ...topUpPrismaFields) topUpFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindFirst) Omit(params ...topUpPrismaFields) topUpFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindFirst) OrderBy(params ...TopUpOrderByParam) topUpFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r topUpFindFirst) Skip(count int) topUpFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpFindFirst) Take(count int) topUpFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpFindFirst) Cursor(cursor TopUpCursorParam) topUpFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r topUpFindFirst) Exec(ctx context.Context) (
+	*TopUpModel,
+	error,
+) {
+	var v *TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r topUpFindFirst) ExecInner(ctx context.Context) (
+	*InnerTopUp,
+	error,
+) {
+	var v *InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type topUpFindMany struct {
+	query builder.Query
+}
+
+func (r topUpFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpFindMany) with()          {}
+func (r topUpFindMany) topUpModel()    {}
+func (r topUpFindMany) topUpRelation() {}
+
+func (r topUpActions) FindMany(
+	params ...TopUpWhereParam,
+) topUpFindMany {
+	var v topUpFindMany
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findMany"
+
+	v.query.Model = "TopUp"
+	v.query.Outputs = topUpOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r topUpFindMany) With(params ...TopUpRelationWith) topUpFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r topUpFindMany) Select(params ...topUpPrismaFields) topUpFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindMany) Omit(params ...topUpPrismaFields) topUpFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range topUpOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r topUpFindMany) OrderBy(params ...TopUpOrderByParam) topUpFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r topUpFindMany) Skip(count int) topUpFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpFindMany) Take(count int) topUpFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r topUpFindMany) Cursor(cursor TopUpCursorParam) topUpFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r topUpFindMany) Exec(ctx context.Context) (
+	[]TopUpModel,
+	error,
+) {
+	var v []TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r topUpFindMany) ExecInner(ctx context.Context) (
+	[]InnerTopUp,
+	error,
+) {
+	var v []InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r topUpFindMany) Update(params ...TopUpSetParam) topUpUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "TopUp"
+
+	r.query.Outputs = countOutput
+
+	var v topUpUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type topUpUpdateMany struct {
+	query builder.Query
+}
+
+func (r topUpUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpUpdateMany) topUpModel() {}
+
+func (r topUpUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpUpdateMany) Tx() TopUpManyTxResult {
+	v := newTopUpManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r topUpFindMany) Delete() topUpDeleteMany {
+	var v topUpDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "TopUp"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type topUpDeleteMany struct {
+	query builder.Query
+}
+
+func (r topUpDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p topUpDeleteMany) topUpModel() {}
+
+func (r topUpDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpDeleteMany) Tx() TopUpManyTxResult {
+	v := newTopUpManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type walletMutationToUserFindUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindUnique) with()                   {}
+func (r walletMutationToUserFindUnique) walletMutationModel()    {}
+func (r walletMutationToUserFindUnique) walletMutationRelation() {}
+
+func (r walletMutationToUserFindUnique) With(params ...UserRelationWith) walletMutationToUserFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationToUserFindUnique) Select(params ...walletMutationPrismaFields) walletMutationToUserFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindUnique) Omit(params ...walletMutationPrismaFields) walletMutationToUserFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindUnique) Exec(ctx context.Context) (
+	*WalletMutationModel,
+	error,
+) {
+	var v *WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationToUserFindUnique) ExecInner(ctx context.Context) (
+	*InnerWalletMutation,
+	error,
+) {
+	var v *InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationToUserFindUnique) Update(params ...WalletMutationSetParam) walletMutationToUserUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "WalletMutation"
+
+	var v walletMutationToUserUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type walletMutationToUserUpdateUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserUpdateUnique) walletMutationModel() {}
+
+func (r walletMutationToUserUpdateUnique) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationToUserUpdateUnique) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r walletMutationToUserFindUnique) Delete() walletMutationToUserDeleteUnique {
+	var v walletMutationToUserDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "WalletMutation"
+
+	return v
+}
+
+type walletMutationToUserDeleteUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p walletMutationToUserDeleteUnique) walletMutationModel() {}
+
+func (r walletMutationToUserDeleteUnique) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationToUserDeleteUnique) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type walletMutationToUserFindFirst struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindFirst) with()                   {}
+func (r walletMutationToUserFindFirst) walletMutationModel()    {}
+func (r walletMutationToUserFindFirst) walletMutationRelation() {}
+
+func (r walletMutationToUserFindFirst) With(params ...UserRelationWith) walletMutationToUserFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Select(params ...walletMutationPrismaFields) walletMutationToUserFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Omit(params ...walletMutationPrismaFields) walletMutationToUserFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindFirst) OrderBy(params ...UserOrderByParam) walletMutationToUserFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Skip(count int) walletMutationToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Take(count int) walletMutationToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Cursor(cursor WalletMutationCursorParam) walletMutationToUserFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r walletMutationToUserFindFirst) Exec(ctx context.Context) (
+	*WalletMutationModel,
+	error,
+) {
+	var v *WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationToUserFindFirst) ExecInner(ctx context.Context) (
+	*InnerWalletMutation,
+	error,
+) {
+	var v *InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type walletMutationToUserFindMany struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserFindMany) with()                   {}
+func (r walletMutationToUserFindMany) walletMutationModel()    {}
+func (r walletMutationToUserFindMany) walletMutationRelation() {}
+
+func (r walletMutationToUserFindMany) With(params ...UserRelationWith) walletMutationToUserFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationToUserFindMany) Select(params ...walletMutationPrismaFields) walletMutationToUserFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindMany) Omit(params ...walletMutationPrismaFields) walletMutationToUserFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationToUserFindMany) OrderBy(params ...UserOrderByParam) walletMutationToUserFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r walletMutationToUserFindMany) Skip(count int) walletMutationToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationToUserFindMany) Take(count int) walletMutationToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationToUserFindMany) Cursor(cursor WalletMutationCursorParam) walletMutationToUserFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r walletMutationToUserFindMany) Exec(ctx context.Context) (
+	[]WalletMutationModel,
+	error,
+) {
+	var v []WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r walletMutationToUserFindMany) ExecInner(ctx context.Context) (
+	[]InnerWalletMutation,
+	error,
+) {
+	var v []InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r walletMutationToUserFindMany) Update(params ...WalletMutationSetParam) walletMutationToUserUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "WalletMutation"
+
+	r.query.Outputs = countOutput
+
+	var v walletMutationToUserUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type walletMutationToUserUpdateMany struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationToUserUpdateMany) walletMutationModel() {}
+
+func (r walletMutationToUserUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationToUserUpdateMany) Tx() WalletMutationManyTxResult {
+	v := newWalletMutationManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r walletMutationToUserFindMany) Delete() walletMutationToUserDeleteMany {
+	var v walletMutationToUserDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "WalletMutation"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type walletMutationToUserDeleteMany struct {
+	query builder.Query
+}
+
+func (r walletMutationToUserDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p walletMutationToUserDeleteMany) walletMutationModel() {}
+
+func (r walletMutationToUserDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationToUserDeleteMany) Tx() WalletMutationManyTxResult {
+	v := newWalletMutationManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type walletMutationFindUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationFindUnique) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindUnique) with()                   {}
+func (r walletMutationFindUnique) walletMutationModel()    {}
+func (r walletMutationFindUnique) walletMutationRelation() {}
+
+func (r walletMutationActions) FindUnique(
+	params WalletMutationEqualsUniqueWhereParam,
+) walletMutationFindUnique {
+	var v walletMutationFindUnique
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findUnique"
+
+	v.query.Model = "WalletMutation"
+	v.query.Outputs = walletMutationOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r walletMutationFindUnique) With(params ...WalletMutationRelationWith) walletMutationFindUnique {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationFindUnique) Select(params ...walletMutationPrismaFields) walletMutationFindUnique {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindUnique) Omit(params ...walletMutationPrismaFields) walletMutationFindUnique {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindUnique) Exec(ctx context.Context) (
+	*WalletMutationModel,
+	error,
+) {
+	var v *WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationFindUnique) ExecInner(ctx context.Context) (
+	*InnerWalletMutation,
+	error,
+) {
+	var v *InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationFindUnique) Update(params ...WalletMutationSetParam) walletMutationUpdateUnique {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateOne"
+	r.query.Model = "WalletMutation"
+
+	var v walletMutationUpdateUnique
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type walletMutationUpdateUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationUpdateUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationUpdateUnique) walletMutationModel() {}
+
+func (r walletMutationUpdateUnique) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationUpdateUnique) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r walletMutationFindUnique) Delete() walletMutationDeleteUnique {
+	var v walletMutationDeleteUnique
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteOne"
+	v.query.Model = "WalletMutation"
+
+	return v
+}
+
+type walletMutationDeleteUnique struct {
+	query builder.Query
+}
+
+func (r walletMutationDeleteUnique) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p walletMutationDeleteUnique) walletMutationModel() {}
+
+func (r walletMutationDeleteUnique) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationDeleteUnique) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type walletMutationFindFirst struct {
+	query builder.Query
+}
+
+func (r walletMutationFindFirst) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindFirst) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindFirst) with()                   {}
+func (r walletMutationFindFirst) walletMutationModel()    {}
+func (r walletMutationFindFirst) walletMutationRelation() {}
+
+func (r walletMutationActions) FindFirst(
+	params ...WalletMutationWhereParam,
+) walletMutationFindFirst {
+	var v walletMutationFindFirst
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findFirst"
+
+	v.query.Model = "WalletMutation"
+	v.query.Outputs = walletMutationOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r walletMutationFindFirst) With(params ...WalletMutationRelationWith) walletMutationFindFirst {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationFindFirst) Select(params ...walletMutationPrismaFields) walletMutationFindFirst {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindFirst) Omit(params ...walletMutationPrismaFields) walletMutationFindFirst {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindFirst) OrderBy(params ...WalletMutationOrderByParam) walletMutationFindFirst {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r walletMutationFindFirst) Skip(count int) walletMutationFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationFindFirst) Take(count int) walletMutationFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationFindFirst) Cursor(cursor WalletMutationCursorParam) walletMutationFindFirst {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r walletMutationFindFirst) Exec(ctx context.Context) (
+	*WalletMutationModel,
+	error,
+) {
+	var v *WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+func (r walletMutationFindFirst) ExecInner(ctx context.Context) (
+	*InnerWalletMutation,
+	error,
+) {
+	var v *InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, ErrNotFound
+	}
+
+	return v, nil
+}
+
+type walletMutationFindMany struct {
+	query builder.Query
+}
+
+func (r walletMutationFindMany) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationFindMany) with()                   {}
+func (r walletMutationFindMany) walletMutationModel()    {}
+func (r walletMutationFindMany) walletMutationRelation() {}
+
+func (r walletMutationActions) FindMany(
+	params ...WalletMutationWhereParam,
+) walletMutationFindMany {
+	var v walletMutationFindMany
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "query"
+
+	v.query.Method = "findMany"
+
+	v.query.Model = "WalletMutation"
+	v.query.Outputs = walletMutationOutput
+
+	var where []builder.Field
+	for _, q := range params {
+		if query := q.getQuery(); query.Operation != "" {
+			v.query.Outputs = append(v.query.Outputs, builder.Output{
+				Name:    query.Method,
+				Inputs:  query.Inputs,
+				Outputs: query.Outputs,
+			})
+		} else {
+			where = append(where, q.field())
+		}
+	}
+
+	if len(where) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:   "where",
+			Fields: where,
+		})
+	}
+
+	return v
+}
+
+func (r walletMutationFindMany) With(params ...WalletMutationRelationWith) walletMutationFindMany {
+	for _, q := range params {
+		query := q.getQuery()
+		r.query.Outputs = append(r.query.Outputs, builder.Output{
+			Name:    query.Method,
+			Inputs:  query.Inputs,
+			Outputs: query.Outputs,
+		})
+	}
+
+	return r
+}
+
+func (r walletMutationFindMany) Select(params ...walletMutationPrismaFields) walletMutationFindMany {
+	var outputs []builder.Output
+
+	for _, param := range params {
+		outputs = append(outputs, builder.Output{
+			Name: string(param),
+		})
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindMany) Omit(params ...walletMutationPrismaFields) walletMutationFindMany {
+	var outputs []builder.Output
+
+	var raw []string
+	for _, param := range params {
+		raw = append(raw, string(param))
+	}
+
+	for _, output := range walletMutationOutput {
+		if !slices.Contains(raw, output.Name) {
+			outputs = append(outputs, output)
+		}
+	}
+
+	r.query.Outputs = outputs
+
+	return r
+}
+
+func (r walletMutationFindMany) OrderBy(params ...WalletMutationOrderByParam) walletMutationFindMany {
+	var fields []builder.Field
+
+	for _, param := range params {
+		fields = append(fields, builder.Field{
+			Name:   param.field().Name,
+			Value:  param.field().Value,
+			Fields: param.field().Fields,
+		})
+	}
+
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:     "orderBy",
+		Fields:   fields,
+		WrapList: true,
+	})
+
+	return r
+}
+
+func (r walletMutationFindMany) Skip(count int) walletMutationFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "skip",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationFindMany) Take(count int) walletMutationFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:  "take",
+		Value: count,
+	})
+	return r
+}
+
+func (r walletMutationFindMany) Cursor(cursor WalletMutationCursorParam) walletMutationFindMany {
+	r.query.Inputs = append(r.query.Inputs, builder.Input{
+		Name:   "cursor",
+		Fields: []builder.Field{cursor.field()},
+	})
+	return r
+}
+
+func (r walletMutationFindMany) Exec(ctx context.Context) (
+	[]WalletMutationModel,
+	error,
+) {
+	var v []WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r walletMutationFindMany) ExecInner(ctx context.Context) (
+	[]InnerWalletMutation,
+	error,
+) {
+	var v []InnerWalletMutation
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func (r walletMutationFindMany) Update(params ...WalletMutationSetParam) walletMutationUpdateMany {
+	r.query.Operation = "mutation"
+	r.query.Method = "updateMany"
+	r.query.Model = "WalletMutation"
+
+	r.query.Outputs = countOutput
+
+	var v walletMutationUpdateMany
+	v.query = r.query
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "data",
+		Fields: fields,
+	})
+	return v
+}
+
+type walletMutationUpdateMany struct {
+	query builder.Query
+}
+
+func (r walletMutationUpdateMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationUpdateMany) walletMutationModel() {}
+
+func (r walletMutationUpdateMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationUpdateMany) Tx() WalletMutationManyTxResult {
+	v := newWalletMutationManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+func (r walletMutationFindMany) Delete() walletMutationDeleteMany {
+	var v walletMutationDeleteMany
+	v.query = r.query
+	v.query.Operation = "mutation"
+	v.query.Method = "deleteMany"
+	v.query.Model = "WalletMutation"
+
+	v.query.Outputs = countOutput
+
+	return v
+}
+
+type walletMutationDeleteMany struct {
+	query builder.Query
+}
+
+func (r walletMutationDeleteMany) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (p walletMutationDeleteMany) walletMutationModel() {}
+
+func (r walletMutationDeleteMany) Exec(ctx context.Context) (*BatchResult, error) {
+	var v BatchResult
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationDeleteMany) Tx() WalletMutationManyTxResult {
+	v := newWalletMutationManyTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
 // --- template transaction.gotpl ---
 
 func newUserUniqueTxResult() UserUniqueTxResult {
@@ -94536,6 +108075,102 @@ func (p PaymentTypeManyTxResult) ExtractQuery() builder.Query {
 func (p PaymentTypeManyTxResult) IsTx() {}
 
 func (r PaymentTypeManyTxResult) Result() (v *BatchResult) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newTopUpUniqueTxResult() TopUpUniqueTxResult {
+	return TopUpUniqueTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type TopUpUniqueTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p TopUpUniqueTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p TopUpUniqueTxResult) IsTx() {}
+
+func (r TopUpUniqueTxResult) Result() (v *TopUpModel) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newTopUpManyTxResult() TopUpManyTxResult {
+	return TopUpManyTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type TopUpManyTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p TopUpManyTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p TopUpManyTxResult) IsTx() {}
+
+func (r TopUpManyTxResult) Result() (v *BatchResult) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newWalletMutationUniqueTxResult() WalletMutationUniqueTxResult {
+	return WalletMutationUniqueTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type WalletMutationUniqueTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p WalletMutationUniqueTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p WalletMutationUniqueTxResult) IsTx() {}
+
+func (r WalletMutationUniqueTxResult) Result() (v *WalletMutationModel) {
+	if err := r.result.Get(r.query.TxResult, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func newWalletMutationManyTxResult() WalletMutationManyTxResult {
+	return WalletMutationManyTxResult{
+		result: &transaction.Result{},
+	}
+}
+
+type WalletMutationManyTxResult struct {
+	query  builder.Query
+	result *transaction.Result
+}
+
+func (p WalletMutationManyTxResult) ExtractQuery() builder.Query {
+	return p.query
+}
+
+func (p WalletMutationManyTxResult) IsTx() {}
+
+func (r WalletMutationManyTxResult) Result() (v *BatchResult) {
 	if err := r.result.Get(r.query.TxResult, &v); err != nil {
 		panic(err)
 	}
@@ -96745,6 +110380,308 @@ func (r paymentTypeUpsertOne) Tx() PaymentTypeUniqueTxResult {
 	return v
 }
 
+type topUpUpsertOne struct {
+	query builder.Query
+}
+
+func (r topUpUpsertOne) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpUpsertOne) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpUpsertOne) with()          {}
+func (r topUpUpsertOne) topUpModel()    {}
+func (r topUpUpsertOne) topUpRelation() {}
+
+func (r topUpActions) UpsertOne(
+	params TopUpEqualsUniqueWhereParam,
+) topUpUpsertOne {
+	var v topUpUpsertOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "upsertOne"
+	v.query.Model = "TopUp"
+	v.query.Outputs = topUpOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r topUpUpsertOne) Create(
+
+	_amount TopUpWithPrismaAmountSetParam,
+	_user TopUpWithPrismaUserSetParam,
+
+	optional ...TopUpSetParam,
+) topUpUpsertOne {
+	var v topUpUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _amount.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r topUpUpsertOne) Update(
+	params ...TopUpSetParam,
+) topUpUpsertOne {
+	var v topUpUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r topUpUpsertOne) CreateOrUpdate(
+
+	_amount TopUpWithPrismaAmountSetParam,
+	_user TopUpWithPrismaUserSetParam,
+
+	optional ...TopUpSetParam,
+) topUpUpsertOne {
+	var v topUpUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _amount.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r topUpUpsertOne) Exec(ctx context.Context) (*TopUpModel, error) {
+	var v TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r topUpUpsertOne) Tx() TopUpUniqueTxResult {
+	v := newTopUpUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
+type walletMutationUpsertOne struct {
+	query builder.Query
+}
+
+func (r walletMutationUpsertOne) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationUpsertOne) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationUpsertOne) with()                   {}
+func (r walletMutationUpsertOne) walletMutationModel()    {}
+func (r walletMutationUpsertOne) walletMutationRelation() {}
+
+func (r walletMutationActions) UpsertOne(
+	params WalletMutationEqualsUniqueWhereParam,
+) walletMutationUpsertOne {
+	var v walletMutationUpsertOne
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+
+	v.query.Operation = "mutation"
+	v.query.Method = "upsertOne"
+	v.query.Model = "WalletMutation"
+	v.query.Outputs = walletMutationOutput
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "where",
+		Fields: builder.TransformEquals([]builder.Field{params.field()}),
+	})
+
+	return v
+}
+
+func (r walletMutationUpsertOne) Create(
+
+	_type WalletMutationWithPrismaTypeSetParam,
+	_amount WalletMutationWithPrismaAmountSetParam,
+	_balanceBefore WalletMutationWithPrismaBalanceBeforeSetParam,
+	_balanceAfter WalletMutationWithPrismaBalanceAfterSetParam,
+	_description WalletMutationWithPrismaDescriptionSetParam,
+	_user WalletMutationWithPrismaUserSetParam,
+
+	optional ...WalletMutationSetParam,
+) walletMutationUpsertOne {
+	var v walletMutationUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _type.field())
+	fields = append(fields, _amount.field())
+	fields = append(fields, _balanceBefore.field())
+	fields = append(fields, _balanceAfter.field())
+	fields = append(fields, _description.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r walletMutationUpsertOne) Update(
+	params ...WalletMutationSetParam,
+) walletMutationUpsertOne {
+	var v walletMutationUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	for _, q := range params {
+
+		field := q.field()
+
+		_, isJson := field.Value.(types.JSON)
+		if field.Value != nil && !isJson {
+			v := field.Value
+			field.Fields = []builder.Field{
+				{
+					Name:  "set",
+					Value: v,
+				},
+			}
+
+			field.Value = nil
+		}
+
+		fields = append(fields, field)
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r walletMutationUpsertOne) CreateOrUpdate(
+
+	_type WalletMutationWithPrismaTypeSetParam,
+	_amount WalletMutationWithPrismaAmountSetParam,
+	_balanceBefore WalletMutationWithPrismaBalanceBeforeSetParam,
+	_balanceAfter WalletMutationWithPrismaBalanceAfterSetParam,
+	_description WalletMutationWithPrismaDescriptionSetParam,
+	_user WalletMutationWithPrismaUserSetParam,
+
+	optional ...WalletMutationSetParam,
+) walletMutationUpsertOne {
+	var v walletMutationUpsertOne
+	v.query = r.query
+
+	var fields []builder.Field
+	fields = append(fields, _type.field())
+	fields = append(fields, _amount.field())
+	fields = append(fields, _balanceBefore.field())
+	fields = append(fields, _balanceAfter.field())
+	fields = append(fields, _description.field())
+	fields = append(fields, _user.field())
+
+	for _, q := range optional {
+		fields = append(fields, q.field())
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "create",
+		Fields: fields,
+	})
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:   "update",
+		Fields: fields,
+	})
+
+	return v
+}
+
+func (r walletMutationUpsertOne) Exec(ctx context.Context) (*WalletMutationModel, error) {
+	var v WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (r walletMutationUpsertOne) Tx() WalletMutationUniqueTxResult {
+	v := newWalletMutationUniqueTxResult()
+	v.query = r.query
+	v.query.TxResult = make(chan []byte, 1)
+	return v
+}
+
 // --- template raw.gotpl ---
 
 type userAggregateRaw struct {
@@ -97956,6 +111893,168 @@ func (r paymentTypeAggregateRaw) Exec(ctx context.Context) ([]PaymentTypeModel, 
 
 func (r paymentTypeAggregateRaw) ExecInner(ctx context.Context) ([]InnerPaymentType, error) {
 	var v []InnerPaymentType
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+type topUpAggregateRaw struct {
+	query builder.Query
+}
+
+func (r topUpAggregateRaw) getQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpAggregateRaw) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r topUpAggregateRaw) with()          {}
+func (r topUpAggregateRaw) topUpModel()    {}
+func (r topUpAggregateRaw) topUpRelation() {}
+
+func (r topUpActions) FindRaw(filter interface{}, options ...interface{}) topUpAggregateRaw {
+	var v topUpAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "findRaw"
+	v.query.Operation = "query"
+	v.query.Model = "TopUp"
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "filter",
+		Value: fmt.Sprintf("%v", filter),
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r topUpActions) AggregateRaw(pipeline []interface{}, options ...interface{}) topUpAggregateRaw {
+	var v topUpAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "aggregateRaw"
+	v.query.Operation = "query"
+	v.query.Model = "TopUp"
+
+	parsedPip := []interface{}{}
+	for _, p := range pipeline {
+		parsedPip = append(parsedPip, fmt.Sprintf("%v", p))
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "pipeline",
+		Value: parsedPip,
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r topUpAggregateRaw) Exec(ctx context.Context) ([]TopUpModel, error) {
+	var v []TopUpModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (r topUpAggregateRaw) ExecInner(ctx context.Context) ([]InnerTopUp, error) {
+	var v []InnerTopUp
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+type walletMutationAggregateRaw struct {
+	query builder.Query
+}
+
+func (r walletMutationAggregateRaw) getQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationAggregateRaw) ExtractQuery() builder.Query {
+	return r.query
+}
+
+func (r walletMutationAggregateRaw) with()                   {}
+func (r walletMutationAggregateRaw) walletMutationModel()    {}
+func (r walletMutationAggregateRaw) walletMutationRelation() {}
+
+func (r walletMutationActions) FindRaw(filter interface{}, options ...interface{}) walletMutationAggregateRaw {
+	var v walletMutationAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "findRaw"
+	v.query.Operation = "query"
+	v.query.Model = "WalletMutation"
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "filter",
+		Value: fmt.Sprintf("%v", filter),
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r walletMutationActions) AggregateRaw(pipeline []interface{}, options ...interface{}) walletMutationAggregateRaw {
+	var v walletMutationAggregateRaw
+	v.query = builder.NewQuery()
+	v.query.Engine = r.client
+	v.query.Method = "aggregateRaw"
+	v.query.Operation = "query"
+	v.query.Model = "WalletMutation"
+
+	parsedPip := []interface{}{}
+	for _, p := range pipeline {
+		parsedPip = append(parsedPip, fmt.Sprintf("%v", p))
+	}
+
+	v.query.Inputs = append(v.query.Inputs, builder.Input{
+		Name:  "pipeline",
+		Value: parsedPip,
+	})
+
+	if len(options) > 0 {
+		v.query.Inputs = append(v.query.Inputs, builder.Input{
+			Name:  "options",
+			Value: fmt.Sprintf("%v", options[0]),
+		})
+	}
+	return v
+}
+
+func (r walletMutationAggregateRaw) Exec(ctx context.Context) ([]WalletMutationModel, error) {
+	var v []WalletMutationModel
+	if err := r.query.Exec(ctx, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (r walletMutationAggregateRaw) ExecInner(ctx context.Context) ([]InnerWalletMutation, error) {
+	var v []InnerWalletMutation
 	if err := r.query.Exec(ctx, &v); err != nil {
 		return nil, err
 	}

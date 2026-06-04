@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -92,10 +91,24 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// ==========================================
-	// A. VALIDASI KEAMANAN (SIGNATURE SECRET)
+	// A. AMBIL SECRET DARI DATABASE (TABEL SUPPLIER)
 	// ==========================================
-	secret := os.Getenv("DIGIFLAZZ_WEBHOOK_SECRET")
-	if secret != "" {
+	supplier, errSupp := h.DB.Supplier.FindFirst(
+		db.Supplier.Code.Equals("DIGIFLAZZ_OFFICIAL"),
+	).Exec(ctx)
+
+	if errSupp != nil {
+		log.Println("⚠️ [WARNING] Supplier DIGIFLAZZ_OFFICIAL tidak ditemukan di database")
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Konfigurasi Supplier tidak ditemukan"})
+	}
+
+	// Ambil kolom webhook_inbound yang baru saja ditambahkan di schema.prisma
+	secret, okSecret := supplier.WebhookInbound()
+
+	// ==========================================
+	// B. VALIDASI KEAMANAN (SIGNATURE HMAC)
+	// ==========================================
+	if okSecret && secret != "" {
 		signatureHeader := c.Request().Header.Get("X-Hub-Signature")
 
 		// Baca body mentah untuk dienkripsi
@@ -107,7 +120,7 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 		// Kembalikan body ke dalam request agar fungsi c.Bind() nanti tetap bisa membacanya
 		c.Request().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// Buat enkripsi HMAC SHA1 dari body request menggunakan Secret kita
+		// Buat enkripsi HMAC SHA1 dari body request menggunakan Secret dari Database
 		mac := hmac.New(sha1.New, []byte(secret))
 		mac.Write(bodyBytes)
 		expectedMAC := hex.EncodeToString(mac.Sum(nil))
@@ -115,13 +128,15 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 
 		// Cocokkan signature dari Digiflazz dengan hasil hitungan kita
 		if signatureHeader != expectedSignature {
-			log.Println("⚠️ [WARNING] Ada request Webhook mencurigakan! Signature tidak cocok.")
+			log.Println("⚠️ [WARNING] Ada request Webhook mencurigakan! Signature tidak cocok dengan Secret di Database.")
 			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Akses Ditolak: Signature Tidak Valid"})
 		}
+	} else {
+		log.Println("⚠️ [WARNING] Webhook Inbound Secret untuk Digiflazz KOSONG di database! Keamanan dinonaktifkan sementara.")
 	}
 
 	// ==========================================
-	// B. PROSES DATA WEBHOOK
+	// C. PROSES DATA WEBHOOK
 	// ==========================================
 	payload := new(WebhookPayload)
 
@@ -134,63 +149,37 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "ref_id kosong"})
 	}
 
-	// 1. Ekstrak Internal Order ID dari RefID
-	// Ingat: Di worker, ref_id formatnya = internalOrderID-itemIndex-qtyIndex (Contoh: uuid-1-1)
-	// Kita ambil UUID murninya dengan mengambil elemen pertama sebelum tanda strip pertama.
+	// Ekstrak Internal Order ID dari RefID dan perbaiki UUID
 	parts := strings.Split(data.RefID, "-")
-	
-	// Jika RefID kurang dari 5 karakter, berarti UUID tidak valid / bukan dari sistem kita
 	if len(parts) < 1 || len(parts[0]) < 10 {
 		return c.JSON(http.StatusOK, echo.Map{"message": "RefID bukan milik GerbangAPI, diabaikan"})
 	}
 	
-	// Kita harus menggabungkan kembali bagian-bagian UUID yang terpisah oleh strip
-	// UUID standar memiliki 4 tanda strip (contoh: 550e8400-e29b-41d4-a716-446655440000)
-	// Jadi kita ambil 5 bagian pertama dan gabungkan kembali
 	var internalOrderID string
 	if len(parts) >= 5 {
 		internalOrderID = strings.Join(parts[0:5], "-")
 	} else {
-		// Fallback jika formatnya tidak standar
 		internalOrderID = parts[0]
 	}
 
-	// 2. Tentukan Status Akhir untuk Database
+	// Tentukan Status Akhir
 	var finalStatus string
 	if data.Status == "Sukses" {
 		finalStatus = "success"
 	} else if data.Status == "Gagal" {
 		finalStatus = "failed"
 	} else {
-		// Jika status masih "Pending", abaikan saja dan biarkan sistem menunggu
 		return c.JSON(http.StatusOK, echo.Map{"message": "Status masih pending, diabaikan"})
 	}
 
 	log.Printf("📥 Webhook Inbound Digiflazz: Order %s status menjadi %s", internalOrderID, finalStatus)
 
-	// 3. Update Database (Tabel supplier_order)
-	// Simpan SN dan Message dari Digiflazz ke kolom provider_trx_id dan last_error
-	_, err := h.DB.Prisma.ExecuteRaw(
-		`UPDATE supplier_order SET status=?, provider_trx_id=?, last_error=?, updated_at=NOW() WHERE internal_order_id=?`,
-		finalStatus, data.SN, data.Message, internalOrderID,
-	).Exec(ctx)
-
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal update tabel supplier_order"})
-	}
-
-	// 4. Update Database (Tabel internal_order utama)
-	_, err = h.DB.Prisma.ExecuteRaw(
-		`UPDATE internal_order SET status=?, updated_at=NOW() WHERE id=?`,
-		finalStatus, internalOrderID,
-	).Exec(ctx)
-
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal update tabel internal_order"})
-	}
+	// Update Database (Tabel supplier_order & internal_order)
+	h.DB.Prisma.ExecuteRaw(`UPDATE supplier_order SET status=?, provider_trx_id=?, last_error=?, updated_at=NOW() WHERE internal_order_id=?`, finalStatus, data.SN, data.Message, internalOrderID).Exec(ctx)
+	h.DB.Prisma.ExecuteRaw(`UPDATE internal_order SET status=?, updated_at=NOW() WHERE id=?`, finalStatus, internalOrderID).Exec(ctx)
 
 	// =================================================================
-	// C. NOTIFIKASI KE SELLER (OUTBOUND WEBHOOK & TELEGRAM)
+	// D. NOTIFIKASI KE SELLER (TETAP PAKAI URL DARI TABEL USER)
 	// =================================================================
 
 	internalOrder, errQuery := h.DB.InternalOrder.FindUnique(
@@ -214,26 +203,15 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 			
 			tujuan := internalOrder.BuyerUID
 			tanggal := time.Now().Format("02 Jan 2006 15:04")
-
-			// Tentukan pesan status
-			statusEmoji := "✅"
-			statusText := "BERHASIL"
-			statusCode := 1
+			statusEmoji, statusText, statusCode := "✅", "BERHASIL", 1
 
 			if finalStatus == "failed" {
-				statusEmoji = "❌"
-				statusText = "GAGAL"
-				statusCode = 2
+				statusEmoji, statusText, statusCode = "❌", "GAGAL", 2
 			}
 
-			// Format SN/Pesan agar lebih informatif
 			keterangan := data.SN
-			if finalStatus == "failed" {
-				keterangan = data.Message
-			}
-			if keterangan == "" {
-				keterangan = "-"
-			}
+			if finalStatus == "failed" { keterangan = data.Message }
+			if keterangan == "" { keterangan = "-" }
 
 			// 1. KIRIM KE TELEGRAM PERSONAL SELLER
 			if chatID, okID := user.TelegramChatID(); okID && chatID != "" {
@@ -255,7 +233,7 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 				go utils.SendTelegramNotification(chatID, msg)
 			}
 
-			// 2. KIRIM KE WEBHOOK SELLER (CALLBACK)
+			// 2. KIRIM KE WEBHOOK SELLER (CALLBACK KE TABEL USER)
 			if webhookURL, okURL := user.WebhookURL(); okURL && webhookURL != "" {
 				webhookPayload := map[string]interface{}{
 					"seller_id":    user.ID,
@@ -277,10 +255,7 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 				go utils.SendWebhookCallback(webhookURL, webhookPayload)
 			}
 		}
-	} else {
-		log.Printf("⚠️ Gagal mengambil data User/Product untuk notifikasi: %v", errQuery)
 	}
 
-	// Respons Wajib: Kembalikan status HTTP 200 agar Digiflazz tahu Webhook sudah diterima
 	return c.JSON(http.StatusOK, echo.Map{"message": "Webhook berhasil diproses"})
 }
