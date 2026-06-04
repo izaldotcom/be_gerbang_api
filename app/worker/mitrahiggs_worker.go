@@ -1,18 +1,16 @@
 package worker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"gerbangapi/app/services/scraper"
+	"gerbangapi/app/utils"
 	"gerbangapi/prisma/db"
 
 	"github.com/redis/go-redis/v9"
@@ -220,7 +218,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 	// 1. Kirim ke ADMIN (Wajib)
 	adminChatID := os.Getenv("TELEGRAM_CHAT_ID")
 	if adminChatID != "" {
-		go sendTelegramNotification(adminChatID, "<b>[ADMIN REPORT]</b>\n"+msg)
+		go utils.SendTelegramNotification(adminChatID, "<b>[ADMIN REPORT]</b>\n"+msg)
 	}
 
 	// 2. Kirim ke USER (Personal) & Webhook
@@ -230,7 +228,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 		// A. Telegram Personal
 		if userChatID, okID := user.TelegramChatID(); okID && userChatID != "" {
 			log.Printf("📩 Sending Telegram msg to User: %s", userChatID)
-			go sendTelegramNotification(userChatID, msg)
+			go utils.SendTelegramNotification(userChatID, msg)
 		} else {
 			log.Println("⚠️ User belum menghubungkan Telegram (Chat ID kosong).")
 		}
@@ -256,7 +254,7 @@ func processNextSupplierOrder(dbClient *db.PrismaClient, redisClient *redis.Clie
 					"message":      "Transaksi berhasil, silakan lakukan pembayaran melalui URL terlampir",
 				},
 			}
-			go sendWebhookCallback(url, webhookPayload)
+			go utils.SendWebhookCallback(url, webhookPayload)
 		}
 	}
 
@@ -284,47 +282,47 @@ func failOrder(dbClient *db.PrismaClient, orderID, internalID, reason string) {
 <b>Internal ID:</b> %s
 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`, orderID, reason, internalID)
 		
-		go sendTelegramNotification(adminChatID, msg)
+		go utils.SendTelegramNotification(adminChatID, msg)
 	}
 }
 
-func sendTelegramNotification(targetChatID string, messageHTML string) {
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if botToken == "" || targetChatID == "" {
-		return 
-	}
+// func sendTelegramNotification(targetChatID string, messageHTML string) {
+// 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+// 	if botToken == "" || targetChatID == "" {
+// 		return 
+// 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	payload := map[string]interface{}{
-		"chat_id":                    targetChatID,
-		"text":                       messageHTML,
-		"parse_mode":                 "HTML",
-		"disable_web_page_preview":   true,
-	}
+// 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+// 	payload := map[string]interface{}{
+// 		"chat_id":                    targetChatID,
+// 		"text":                       messageHTML,
+// 		"parse_mode":                 "HTML",
+// 		"disable_web_page_preview":   true,
+// 	}
 
-	jsonVal, _ := json.Marshal(payload)
+// 	jsonVal, _ := json.Marshal(payload)
 	
-	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonVal))
-	if err != nil {
-		log.Printf("⚠️ Gagal kirim Telegram: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-}
+// 	client := http.Client{Timeout: 10 * time.Second}
+// 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonVal))
+// 	if err != nil {
+// 		log.Printf("⚠️ Gagal kirim Telegram: %v", err)
+// 		return
+// 	}
+// 	defer resp.Body.Close()
+// }
 
-func sendWebhookCallback(targetURL string, payload interface{}) {
-	jsonVal, _ := json.Marshal(payload)
+// func sendWebhookCallback(targetURL string, payload interface{}) {
+// 	jsonVal, _ := json.Marshal(payload)
 
-	for i := 0; i < 3; i++ {
-		client := http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
-		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if resp.Body != nil { resp.Body.Close() }
-			log.Printf("✅ Webhook sent successfully to %s", targetURL)
-			return
-		}
-		time.Sleep(2 * time.Second)
-	}
-	log.Printf("❌ Webhook gave up after 3 attempts")
-}
+// 	for i := 0; i < 3; i++ {
+// 		client := http.Client{Timeout: 10 * time.Second}
+// 		resp, err := client.Post(targetURL, "application/json", bytes.NewBuffer(jsonVal))
+// 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+// 			if resp.Body != nil { resp.Body.Close() }
+// 			log.Printf("✅ Webhook sent successfully to %s", targetURL)
+// 			return
+// 		}
+// 		time.Sleep(2 * time.Second)
+// 	}
+// 	log.Printf("❌ Webhook gave up after 3 attempts")
+// }

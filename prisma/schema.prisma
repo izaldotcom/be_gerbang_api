@@ -66,11 +66,12 @@ model APIKey {
 model Supplier {
   id               String            @id @default(uuid())
   name             String
-  username         String?           
-  password         String?           
+  username         String?            
+  password         String?            
   code             String            @default("DEFAULT")
   type             String
   base_url         String?
+  webhook_inbound  String?           
   status           Boolean           @default(true)
   created_at       DateTime          @default(now())
   updated_at       DateTime          @updatedAt
