@@ -49,8 +49,8 @@ func (h *TopUpHandler) RequestTopUp(c echo.Context) error {
 
 	// Simpan data ke tabel TopUp (Status default adalah 'pending')
 	topup, err := h.DB.TopUp.CreateOne(
-		db.TopUp.User.Link(db.User.ID.Equals(userID)),
 		db.TopUp.Amount.Set(req.Amount),
+		db.TopUp.User.Link(db.User.ID.Equals(userID)),
 		db.TopUp.PaymentMethod.Set(req.PaymentMethod),
 	).Exec(ctx)
 
@@ -136,17 +136,18 @@ func (h *TopUpHandler) ApproveTopUp(c echo.Context) error {
 			db.TopUp.Status.Set("success"),
 		).Exec(ctx)
 
-		// Catat riwayat ke tabel Buku Kas (WalletMutation)
 		paymentMethod, _ := topup.PaymentMethod()
 		desc := fmt.Sprintf("Top-Up Manual via %s", paymentMethod)
 		
 		h.DB.WalletMutation.CreateOne(
-			db.WalletMutation.User.Link(db.User.ID.Equals(user.ID)),
-			db.WalletMutation.Type.Set("CREDIT"), // Uang masuk
-			db.WalletMutation.Amount.Set(topup.Amount),
-			db.WalletMutation.BalanceBefore.Set(balanceBefore),
-			db.WalletMutation.BalanceAfter.Set(balanceAfter),
-			db.WalletMutation.Description.Set(desc),
+			db.WalletMutation.Type.Set("CREDIT"),                       // 1. Type
+			db.WalletMutation.Amount.Set(topup.Amount),                 // 2. Amount
+			db.WalletMutation.BalanceBefore.Set(balanceBefore),         // 3. BalanceBefore
+			db.WalletMutation.BalanceAfter.Set(balanceAfter),           // 4. BalanceAfter
+			db.WalletMutation.Description.Set(desc),                    // 5. Description
+			db.WalletMutation.User.Link(db.User.ID.Equals(user.ID)),    // 6. User (Relasi)
+			
+			// Kolom opsional selalu bebas diletakkan paling akhir:
 			db.WalletMutation.ReferenceID.Set(topup.ID),
 		).Exec(ctx)
 
