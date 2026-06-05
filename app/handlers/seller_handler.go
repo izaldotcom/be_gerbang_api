@@ -69,6 +69,7 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 	if r, ok := user.Role(); ok {
 		roleName = r.Name
 	}
+	balance := user.Balance
 
 	return c.JSON(http.StatusOK, echo.Map{
 		"message": "Success retrieving seller profile",
@@ -82,6 +83,7 @@ func (h *SellerHandler) GetProfile(c echo.Context) error {
 			"api_key":          keyData.APIKey,
 			"status":           statusVal,
 			"role_name":        roleName,
+			"balance":          balance,
 		},
 	})
 }
@@ -198,7 +200,7 @@ func (h *SellerHandler) SellerProducts(c echo.Context) error {
 }
 
 // ==========================================
-// 4. CREATE ORDER (DENGAN VALIDASI NICKNAME DINAMIS)
+// 4. CREATE ORDER (DENGAN PEMOTONGAN SALDO)
 // ==========================================
 func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	type Req struct {
@@ -215,8 +217,6 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 	}
 
-	// [PERBAIKAN] PaymentTypeID tidak lagi diwajibkan secara ketat di sini,
-	// karena beberapa supplier (seperti Digiflazz) tidak membutuhkannya.
 	if req.ProductID == "" || req.Destination == "" || req.SupplierID == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "product_id, destination, dan supplier_id wajib diisi"})
 	}
@@ -224,14 +224,13 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// ==========================================
-	// A. AMBIL DATA PRODUCT TERLEBIH DAHULU
+	// A. AMBIL DATA PRODUCT
 	// ==========================================
 	product, err := h.DB.Product.FindUnique(
 		db.Product.ID.Equals(req.ProductID),
 	).Exec(ctx)
 
 	if err != nil {
-		// Fallback search by name
 		product, err = h.DB.Product.FindFirst(
 			db.Product.Name.Contains(req.ProductID),
 		).Exec(ctx)
@@ -240,23 +239,21 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		}
 	}
 	realProductUUID := product.ID
+	productPrice := float64(product.Price) // Konversi harga ke float untuk kalkulasi saldo
 
 	// ==========================================
 	// B. PENENTUAN KODE GAME DINAMIS
 	// ==========================================
-	// Idealnya ini menggunakan kolom kategori di database (misal: product.Category.Code).
-	// Sebagai solusi cerdas tanpa merombak DB, kita deteksi dari kata kunci di nama produk:
 	productName := strings.ToLower(product.Name)
 	kodeGame := ""
 
 	if strings.Contains(productName, "pln") || strings.Contains(productName, "token") {
 		kodeGame = "pln"
 	} else if strings.Contains(productName, "mobile legends") || strings.Contains(productName, "mlbb") || strings.Contains(productName, "koin emas") {
-		kodeGame = "ml" // Kode untuk Mobile Legends / Mitra Higgs
+		kodeGame = "ml" 
 	} else if strings.Contains(productName, "free fire") || strings.Contains(productName, "ff") {
 		kodeGame = "ff"
 	}
-	// Anda bisa menambahkan deteksi game/produk lain di sini jika diperlukan
 
 	// ==========================================
 	// C. VALIDASI NICKNAME (KONDISIONAL)
@@ -265,7 +262,6 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	var nickname string
 	var errVal error
 
-	// Hanya lakukan validasi API jika kodeGame dikenali
 	if kodeGame != "" {
 		nickname, errVal = validationService.CekNickname(kodeGame, req.Destination)
 		if errVal != nil {
@@ -275,14 +271,12 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		}
 		log.Printf("👤 Player Valid: %s untuk ID %s (Game: %s)", nickname, req.Destination, kodeGame)
 	} else {
-		// Jika produk tidak dikenali sebagai game (misal: Pulsa Telkomsel biasa)
-		// maka lewati pengecekan nickname pihak ketiga.
 		log.Printf("⏩ Melewati validasi Cek Nickname untuk produk: %s", product.Name)
-		nickname = req.Destination // Default kembali ke nomor yang diketik user
+		nickname = req.Destination 
 	}
 
 	// ==========================================
-	// D. AMBIL USER ID (Dari Context Middleware)
+	// D. AMBIL DATA USER
 	// ==========================================
 	userID, ok := c.Get("user_id").(string)
 	if !ok || userID == "" {
@@ -299,13 +293,54 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized: User ID not found"})
 	}
 
+	// Ambil data detail user untuk mendapatkan Balance terbarunya
+	user, errUser := h.DB.User.FindUnique(db.User.ID.Equals(userID)).Exec(ctx)
+	if errUser != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal membaca data user"})
+	}
+
 	// ==========================================
-	// E. INSERT INTERNAL ORDER (Status: Pending)
+	// D-2. [BARU] PENGECEKAN DAN PEMOTONGAN SALDO
+	// ==========================================
+	balanceBefore := user.Balance
+
+	if balanceBefore < productPrice {
+		return c.JSON(http.StatusPaymentRequired, echo.Map{
+			"error": fmt.Sprintf("Saldo Anda tidak mencukupi. Sisa saldo: Rp %.2f, Harga: Rp %.2f", balanceBefore, productPrice),
+		})
+	}
+
+	// Lakukan pemotongan menggunakan ExecuteRaw dengan klausa WHERE balance >= price (Mencegah Double Spend/Race Condition)
+	res, errUpdate := h.DB.Prisma.ExecuteRaw(
+		`UPDATE user SET balance = balance - ?, updated_at = NOW() WHERE id = ? AND balance >= ?`,
+		productPrice, user.ID, productPrice,
+	).Exec(ctx)
+
+	if errUpdate != nil || res.Count == 0 {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal memproses pembayaran. Transaksi dibatalkan."})
+	}
+
+	balanceAfter := balanceBefore - productPrice
+
+	// Catat di Buku Kas Mutasi (Debit / Uang Keluar)
+	desc := fmt.Sprintf("Pembelian %s ke %s", product.Name, req.Destination)
+	h.DB.WalletMutation.CreateOne(
+		db.WalletMutation.Type.Set("DEBIT"),
+		db.WalletMutation.Amount.Set(productPrice),
+		db.WalletMutation.BalanceBefore.Set(balanceBefore),
+		db.WalletMutation.BalanceAfter.Set(balanceAfter),
+		db.WalletMutation.Description.Set(desc),
+		db.WalletMutation.User.Link(db.User.ID.Equals(user.ID)),
+	).Exec(ctx)
+
+	log.Printf("💸 Saldo User %s dipotong sebesar %v", user.ID, productPrice)
+
+	// ==========================================
+	// E. INSERT INTERNAL ORDER
 	// ==========================================
 	internalOrderID := uuid.New().String()
-	// Pisahkan query berdasarkan ketersediaan payment_type_id
+	
 	if req.PaymentTypeID == "" {
-		// Jika KOSONG (Digiflazz), eksekusi tanpa kolom payment_type_id
 		_, err = h.DB.Prisma.ExecuteRaw(
 			`INSERT INTO internal_order 
 			 (id, product_id, user_id, buyer_uid, quantity, status, created_at, updated_at) 
@@ -313,7 +348,6 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 			internalOrderID, realProductUUID, userID, req.Destination, 1,
 		).Exec(ctx)
 	} else {
-		// Jika ADA (Mitra Higgs), eksekusi lengkap dengan payment_type_id
 		_, err = h.DB.Prisma.ExecuteRaw(
 			`INSERT INTO internal_order 
 			 (id, product_id, user_id, payment_type_id, buyer_uid, quantity, status, created_at, updated_at) 
@@ -323,31 +357,36 @@ func (h *SellerHandler) SellerOrder(c echo.Context) error {
 	}
 
 	if err != nil {
+		// PENTING: Karena saldo sudah terpotong, jika insert gagal, kembalikan saldonya (Refund)
+		h.DB.Prisma.ExecuteRaw(`UPDATE user SET balance = balance + ? WHERE id = ?`, productPrice, user.ID).Exec(ctx)
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Database error: " + err.Error()})
 	}
 
 	// ==========================================
-	// F. MIXING PROCESS (Memecah menjadi Supplier Order)
+	// F. MIXING PROCESS
 	// ==========================================
 	supplierOrder, mixErr := h.OrderService.ProcessInternalOrder(ctx, internalOrderID, req.SupplierID)
 
 	if mixErr != nil {
 		h.DB.Prisma.ExecuteRaw("UPDATE internal_order SET status='failed' WHERE id=?", internalOrderID).Exec(ctx)
+		// Refund saldo jika gagal masuk antrian
+		h.DB.Prisma.ExecuteRaw(`UPDATE user SET balance = balance + ? WHERE id = ?`, productPrice, user.ID).Exec(ctx)
+		
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Mixing failed: " + mixErr.Error()})
 	}
 
 	// ==========================================
-	// G. RESPONSE CEPAT (Accepted)
+	// G. RESPONSE CEPAT
 	// ==========================================
 	log.Printf("✅ Order Accepted: %s -> Masuk Antrian Worker", internalOrderID)
 
 	return c.JSON(http.StatusAccepted, echo.Map{
 		"status":            "pending",
-		"message":           "Order accepted and queued for processing",
+		"message":           "Order accepted and payment successful",
 		"player_name":       nickname,
 		"order_id":          internalOrderID,
 		"supplier_order_id": supplierOrder.ID,
-		"estimated_time":    "1-2 minutes",
+		"remaining_balance": balanceAfter,
 	})
 }
 

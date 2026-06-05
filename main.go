@@ -99,8 +99,8 @@ func main() {
 	// payment type
 	paymentTypeHandler := handlers.NewPaymentTypeHandler(client, redisClient)
 
-	// [BARU] Inisialisasi Handler Digiflazz
 	dfHandler := digihandler.NewHandler(client, redisClient)
+	topupHandler := handlers.NewTopUpHandler(client)
 
 	// ---------------------------------------------------------
 	// 6. REGISTER ROUTES
@@ -117,6 +117,7 @@ func main() {
 		telegramHandler,
 		paymentTypeHandler,
 		dfHandler,
+		topupHandler,
 	)
 
 	// 7. Start Server

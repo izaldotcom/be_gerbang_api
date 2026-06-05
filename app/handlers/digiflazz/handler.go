@@ -91,18 +91,12 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	// ==========================================
-	// A. AMBIL SECRET DARI DATABASE (TABEL SUPPLIER)
+	// A. AMBIL SECRET DARI DATABASE
 	// ==========================================
-	supplier, errSupp := h.DB.Supplier.FindFirst(
-		db.Supplier.Code.Equals("DIGIFLAZZ_OFFICIAL"),
-	).Exec(ctx)
-
+	supplier, errSupp := h.DB.Supplier.FindFirst(db.Supplier.Code.Equals("DIGIFLAZZ_OFFICIAL")).Exec(ctx)
 	if errSupp != nil {
-		log.Println("⚠️ [WARNING] Supplier DIGIFLAZZ_OFFICIAL tidak ditemukan di database")
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Konfigurasi Supplier tidak ditemukan"})
 	}
-
-	// Ambil kolom webhook_inbound yang baru saja ditambahkan di schema.prisma
 	secret, okSecret := supplier.WebhookInbound()
 
 	// ==========================================
@@ -110,36 +104,21 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 	// ==========================================
 	if okSecret && secret != "" {
 		signatureHeader := c.Request().Header.Get("X-Hub-Signature")
-
-		// Baca body mentah untuk dienkripsi
-		bodyBytes, errRead := io.ReadAll(c.Request().Body)
-		if errRead != nil {
-			return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal membaca body"})
-		}
-
-		// Kembalikan body ke dalam request agar fungsi c.Bind() nanti tetap bisa membacanya
+		bodyBytes, _ := io.ReadAll(c.Request().Body)
 		c.Request().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// Buat enkripsi HMAC SHA1 dari body request menggunakan Secret dari Database
 		mac := hmac.New(sha1.New, []byte(secret))
 		mac.Write(bodyBytes)
-		expectedMAC := hex.EncodeToString(mac.Sum(nil))
-		expectedSignature := "sha1=" + expectedMAC
-
-		// Cocokkan signature dari Digiflazz dengan hasil hitungan kita
-		if signatureHeader != expectedSignature {
-			log.Println("⚠️ [WARNING] Ada request Webhook mencurigakan! Signature tidak cocok dengan Secret di Database.")
-			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Akses Ditolak: Signature Tidak Valid"})
+		if signatureHeader != "sha1="+hex.EncodeToString(mac.Sum(nil)) {
+			log.Println("⚠️ Webhook mencurigakan! Signature tidak valid.")
+			return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Signature Tidak Valid"})
 		}
-	} else {
-		log.Println("⚠️ [WARNING] Webhook Inbound Secret untuk Digiflazz KOSONG di database! Keamanan dinonaktifkan sementara.")
 	}
 
 	// ==========================================
 	// C. PROSES DATA WEBHOOK
 	// ==========================================
 	payload := new(WebhookPayload)
-
 	if err := c.Bind(payload); err != nil {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Format payload tidak valid"})
 	}
@@ -149,39 +128,34 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "ref_id kosong"})
 	}
 
-	// Ekstrak Internal Order ID dari RefID dan perbaiki UUID
 	parts := strings.Split(data.RefID, "-")
 	if len(parts) < 1 || len(parts[0]) < 10 {
 		return c.JSON(http.StatusOK, echo.Map{"message": "RefID bukan milik GerbangAPI, diabaikan"})
 	}
 	
-	var internalOrderID string
+	internalOrderID := parts[0]
 	if len(parts) >= 5 {
 		internalOrderID = strings.Join(parts[0:5], "-")
-	} else {
-		internalOrderID = parts[0]
 	}
 
-	// Tentukan Status Akhir
 	var finalStatus string
 	if data.Status == "Sukses" {
 		finalStatus = "success"
 	} else if data.Status == "Gagal" {
 		finalStatus = "failed"
 	} else {
-		return c.JSON(http.StatusOK, echo.Map{"message": "Status masih pending, diabaikan"})
+		return c.JSON(http.StatusOK, echo.Map{"message": "Status masih pending"})
 	}
 
-	log.Printf("📥 Webhook Inbound Digiflazz: Order %s status menjadi %s", internalOrderID, finalStatus)
+	log.Printf("📥 Webhook Inbound: Order %s status menjadi %s", internalOrderID, finalStatus)
 
-	// Update Database (Tabel supplier_order & internal_order)
+	// Update Status di Database
 	h.DB.Prisma.ExecuteRaw(`UPDATE supplier_order SET status=?, provider_trx_id=?, last_error=?, updated_at=NOW() WHERE internal_order_id=?`, finalStatus, data.SN, data.Message, internalOrderID).Exec(ctx)
 	h.DB.Prisma.ExecuteRaw(`UPDATE internal_order SET status=?, updated_at=NOW() WHERE id=?`, finalStatus, internalOrderID).Exec(ctx)
 
 	// =================================================================
-	// D. NOTIFIKASI KE SELLER (TETAP PAKAI URL DARI TABEL USER)
+	// D. REFUND & NOTIFIKASI KE SELLER
 	// =================================================================
-
 	internalOrder, errQuery := h.DB.InternalOrder.FindUnique(
 		db.InternalOrder.ID.Equals(internalOrderID),
 	).With(
@@ -195,25 +169,55 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 
 		if okUser && user != nil {
 			productName := "Produk Tidak Diketahui"
-			productPrice := 0
+			productPrice := float64(0)
+			
 			if product != nil {
 				productName = product.Name
-				productPrice = product.Price
+				productPrice = float64(product.Price)
 			}
 			
 			tujuan := internalOrder.BuyerUID
 			tanggal := time.Now().Format("02 Jan 2006 15:04")
 			statusEmoji, statusText, statusCode := "✅", "BERHASIL", 1
 
+			// -------------------------------------------------------------
+			// [BARU] LOGIKA REFUND JIKA TRANSAKSI GAGAL
+			// -------------------------------------------------------------
 			if finalStatus == "failed" {
 				statusEmoji, statusText, statusCode = "❌", "GAGAL", 2
+
+				// 1. Tambahkan saldo kembali ke User
+				balanceBefore := user.Balance
+				balanceAfter := balanceBefore + productPrice
+
+				_, errRefund := h.DB.Prisma.ExecuteRaw(
+					`UPDATE user SET balance = balance + ?, updated_at=NOW() WHERE id = ?`, 
+					productPrice, user.ID,
+				).Exec(ctx)
+
+				if errRefund == nil {
+					// 2. Catat di Buku Kas (Mutasi Masuk / CREDIT)
+					desc := fmt.Sprintf("Refund Transaksi Gagal - %s ke %s", productName, tujuan)
+					h.DB.WalletMutation.CreateOne(
+						db.WalletMutation.Type.Set("CREDIT"),
+						db.WalletMutation.Amount.Set(productPrice),
+						db.WalletMutation.BalanceBefore.Set(balanceBefore),
+						db.WalletMutation.BalanceAfter.Set(balanceAfter),
+						db.WalletMutation.Description.Set(desc),
+						db.WalletMutation.User.Link(db.User.ID.Equals(user.ID)),
+						db.WalletMutation.ReferenceID.Set(internalOrder.ID),
+					).Exec(ctx)
+
+					log.Printf("♻️ Auto-Refund Berhasil: Rp %v dikembalikan ke User %s", productPrice, user.ID)
+				}
 			}
+			// -------------------------------------------------------------
 
 			keterangan := data.SN
 			if finalStatus == "failed" { keterangan = data.Message }
 			if keterangan == "" { keterangan = "-" }
 
-			// 1. KIRIM KE TELEGRAM PERSONAL SELLER
+			// KIRIM TELEGRAM
 			if chatID, okID := user.TelegramChatID(); okID && chatID != "" {
 				msg := fmt.Sprintf(`
 <b>%s TRANSAKSI %s</b>
@@ -233,7 +237,7 @@ func (h *Handler) HandleWebhook(c echo.Context) error {
 				go utils.SendTelegramNotification(chatID, msg)
 			}
 
-			// 2. KIRIM KE WEBHOOK SELLER (CALLBACK KE TABEL USER)
+			// KIRIM WEBHOOK CALLBACK KE SELLER
 			if webhookURL, okURL := user.WebhookURL(); okURL && webhookURL != "" {
 				webhookPayload := map[string]interface{}{
 					"seller_id":    user.ID,

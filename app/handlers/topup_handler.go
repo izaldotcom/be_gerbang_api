@@ -24,13 +24,33 @@ func NewTopUpHandler(dbClient *db.PrismaClient) *TopUpHandler {
 // 1. REQUEST TOP-UP (OLEH SELLER)
 // ==========================================
 func (h *TopUpHandler) RequestTopUp(c echo.Context) error {
-	// Ambil User ID dari JWT atau API Key Middleware
-	userID, ok := c.Get("user_id").(string)
-	if !ok || userID == "" {
-		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Unauthorized"})
+	ctx := c.Request().Context()
+
+	// 1. Ekstraksi User ID yang Sangat Aman (Mendukung JWT & API Key)
+	var userID string
+	
+	// Coba ambil dari konteks (biasanya diisi oleh Middleware JWT)
+	if id, ok := c.Get("user_id").(string); ok && id != "" {
+		userID = id
 	}
 
-	// Tangkap input dari user
+	// Jika kosong, coba ambil paksa dari Header X-API-KEY
+	if userID == "" {
+		apiKey := c.Request().Header.Get("X-API-KEY")
+		if apiKey != "" {
+			keyData, _ := h.DB.APIKey.FindUnique(db.APIKey.APIKey.Equals(apiKey)).Exec(ctx)
+			if keyData != nil {
+				userID = keyData.UserID
+			}
+		}
+	}
+
+	// Jika identitas benar-benar tidak ditemukan, tolak dengan lembut
+	if userID == "" {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "Sesi tidak valid atau API Key salah. Silakan relogin."})
+	}
+
+	// 2. Tangkap Payload Input
 	type Req struct {
 		Amount        float64 `json:"amount"`
 		PaymentMethod string  `json:"payment_method"`
@@ -38,32 +58,34 @@ func (h *TopUpHandler) RequestTopUp(c echo.Context) error {
 
 	req := new(Req)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Format input tidak valid"})
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Format JSON tidak valid"})
 	}
 
 	if req.Amount < 10000 {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "Minimal top-up adalah Rp 10.000"})
 	}
 
-	ctx := c.Request().Context()
-
-	// Simpan data ke tabel TopUp (Status default adalah 'pending')
+	// 3. Simpan ke Tabel TopUp (Prisma Go)
 	topup, err := h.DB.TopUp.CreateOne(
 		db.TopUp.Amount.Set(req.Amount),
 		db.TopUp.User.Link(db.User.ID.Equals(userID)),
 		db.TopUp.PaymentMethod.Set(req.PaymentMethod),
 	).Exec(ctx)
 
+	// 4. Tangani Error Database (Mencegah Internal Server Error)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal membuat request top-up"})
+		log.Printf("❌ DATABASE ERROR SAAT TOPUP: %v\n", err)
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Terjadi masalah pada database: " + err.Error()})
 	}
 
+	paymentMethodVal, _ := topup.PaymentMethod()
+
 	return c.JSON(http.StatusOK, echo.Map{
-		"message": "Request Top-Up berhasil dibuat. Silakan lakukan transfer dan hubungi Admin.",
+		"message": "Request Top-Up berhasil dibuat",
 		"data": echo.Map{
 			"topup_id":       topup.ID,
 			"amount":         topup.Amount,
-			"payment_method": topup.PaymentMethod,
+			"payment_method": paymentMethodVal, // <--- Gunakan variabel yang sudah diekstrak
 			"status":         topup.Status,
 		},
 	})
@@ -164,4 +186,48 @@ func (h *TopUpHandler) ApproveTopUp(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusBadRequest, echo.Map{"error": "Action tidak dikenali. Gunakan 'approve' atau 'reject'"})
+}
+
+// ==========================================
+// 3. GET ALL TOP-UPS (UNTUK ADMIN)
+// ==========================================
+func (h *TopUpHandler) GetAllTopUps(c echo.Context) error {
+	ctx := c.Request().Context()
+
+	// Ambil semua topup, urutkan dari yang terbaru, dan bawa data User-nya
+	topups, err := h.DB.TopUp.FindMany().With(
+		db.TopUp.User.Fetch(),
+	).OrderBy(
+		db.TopUp.CreatedAt.Order(db.SortOrderDesc),
+	).Exec(ctx)
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Gagal mengambil data Top-Up: " + err.Error()})
+	}
+
+	var response []map[string]interface{}
+	for _, t := range topups {
+		userName := "Unknown"
+		
+		user := t.User() 
+		if user != nil {
+			userName = user.Name
+		}
+		
+		pm, _ := t.PaymentMethod()
+
+		response = append(response, map[string]interface{}{
+			"id":             t.ID,
+			"amount":         t.Amount,
+			"payment_method": pm,
+			"status":         t.Status,
+			"created_at":     t.CreatedAt,
+			"user_name":      userName,
+		})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		"message": "Berhasil mengambil data",
+		"data":    response,
+	})
 }

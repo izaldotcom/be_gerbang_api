@@ -46,7 +46,8 @@ type UserSession struct {
 	Status         string `json:"status"`
 	ApiKey         string `json:"api_key"`
 	WebhookURL     string `json:"webhook_url"`
-	TelegramChatID string `json:"telegram_chat_id"` // <--- Tambahkan baris ini
+	TelegramChatID string `json:"telegram_chat_id"`
+	Balance        float64 `json:"balance"`
 }
 
 type JwtClaims struct {
@@ -236,6 +237,8 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		}
 	}
 
+	balance := user.Balance
+
 	userSession := UserSession{
 		ID:             user.ID,
 		Name:           user.Name,
@@ -247,6 +250,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*TokenRespon
 		ApiKey:         userApiKey,
 		WebhookURL:     webhookVal,
 		TelegramChatID: telegramChatIDVal, // [BARU] Tambahkan ke struct session
+		Balance:        balance,          // [BARU] Tambahkan ke struct session
 	}
 
 	jsonData, _ := json.Marshal(userSession)

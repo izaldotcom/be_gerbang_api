@@ -22,6 +22,7 @@ func Init(
 	telegramHandler *handlers.TelegramHandler,
 	paymentTypeHandler *handlers.PaymentTypeHandler,
 	dfHandler *digihandler.Handler,
+	topupHandler *handlers.TopUpHandler,
 ) {
 	// Grouping v1
 	v1 := e.Group("/api/v1")
@@ -40,7 +41,7 @@ func Init(
 	// Route untuk Telegram Webhook
 	v1.POST("/webhook/telegram", telegramHandler.HandleWebhook)
 
-	// === [BARU] Route untuk Menerima Webhook Digiflazz ===
+	// Route untuk Menerima Webhook Digiflazz ===
 	v1.POST("/webhook/digiflazz", dfHandler.HandleWebhook)
 
 	// ==========================================
@@ -51,7 +52,7 @@ func Init(
 
 	// --- 1. User & Auth Management ---
 	protected.GET("/auth/me", authHandler.Me)
-	protected.DELETE("/users", authHandler.DeleteUser) // Delete User (Admin Only - via query param ?id=...)
+	protected.DELETE("/users", authHandler.DeleteUser)
 
 	// --- 3. Internal Products (CRUD) ---
 	protected.POST("/products", productHandler.Create)
@@ -82,8 +83,8 @@ func Init(
 	protected.DELETE("/recipes/:id", recipeHandler.Delete)
 
 	// === [PERBAIKAN] Tambahkan 2 baris ini untuk handle hapus massal via query param ===
-	protected.DELETE("/recipes", recipeHandler.Delete)  // Menangani /recipes?product_id=...
-	protected.DELETE("/recipes/", recipeHandler.Delete) // Menangani /recipes/?product_id=... (Sesuai log FE Anda)
+	protected.DELETE("/recipes", recipeHandler.Delete) 
+	protected.DELETE("/recipes/", recipeHandler.Delete)
 	// ===================================================================================
 
 	// --- 7. Payment Types ---
@@ -91,6 +92,10 @@ func Init(
 
 	// --- 8. [BARU] Digiflazz Admin ---
 	protected.POST("/admin/sync-digiflazz", dfHandler.SyncProducts)
+
+	// --- 9. [BARU] Admin Top-Up Management ---
+	protected.POST("/admin/topup/approve", topupHandler.ApproveTopUp)
+	protected.GET("/admin/topups", topupHandler.GetAllTopUps)
 
 	// ==========================================
 	// C. SELLER ROUTES (Butuh API KEY)
@@ -102,8 +107,8 @@ func Init(
 	sellerGroup.GET("/products", sellerHandler.SellerProducts)
 	sellerGroup.POST("/order", sellerHandler.SellerOrder)
 	sellerGroup.GET("/order/history", sellerHandler.HistoryOrder)
-
 	sellerGroup.GET("/status", func(c echo.Context) error {
 		return c.JSON(200, echo.Map{"message": "Seller status endpoint"})
 	})
+	sellerGroup.POST("/topup/request", topupHandler.RequestTopUp)
 }
